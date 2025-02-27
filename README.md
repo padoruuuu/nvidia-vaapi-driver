@@ -1,6 +1,6 @@
 # nvidia-vaapi-driver
 
-This is an VA-API implementation that uses NVDEC as a backend. This implementation is specifically designed to be used by Firefox for accelerated decode of web content, and may not operate correctly in other applications.
+This is a fork of the nvidia VA-API implementation that attempts to add support for nvenc as a backend. This implementation is specifically designed to be used by Firefox for accelerated decode of web content, and may not operate correctly in other applications.
 
 # Table of contents
 
