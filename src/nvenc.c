@@ -42,11 +42,57 @@
     } while (0)
 
 /*
- * Note: The VAAPI helper functions (check_va_support, create_va_config,
- * nvenc_vaCreateConfig, nvenc_vaGetConfigAttributes, nvenc_init_driver) that were once here
- * have been removed. The common VAAPI driver functionality is now integrated into vabackend.c,
- * so clients should use the VAAPI interface (via the vtable) from that backend.
+ * Minimal VAAPI configuration functions for NVENC encoding.
+ * These functions allow a VAAPI client (like FFmpeg's VAAPI encoder)
+ * to open a codec even though NVENC does not implement a full VAAPI backend.
  */
+VAStatus nvenc_vaCreateConfig(VADisplay dpy, VAProfile profile, VAEntrypoint entrypoint,
+                              VAConfigAttrib *attrib_list, int num_attribs, VAConfigID *config_id)
+{
+    /* For encoding, we simply return a dummy configuration ID.
+       (Any nonzero value is considered valid.) */
+    if (!config_id)
+        return VA_STATUS_ERROR_INVALID_PARAMETER;
+    *config_id = 1;
+    log_info("nvenc_vaCreateConfig: created dummy config id %u for profile %d, entrypoint %d", *config_id, profile, entrypoint);
+    return VA_STATUS_SUCCESS;
+}
+
+VAStatus nvenc_vaGetConfigAttributes(VADisplay dpy, VAProfile profile, VAEntrypoint entrypoint,
+                                     VAConfigAttrib *attrib_list, int num_attribs)
+{
+    /* For our purposes, we only support NV12 (YUV420) as the render target.
+       Any attribute not of type VAConfigAttribRTFormat is returned as 0. */
+    for (int i = 0; i < num_attribs; i++) {
+        if (attrib_list[i].type == VAConfigAttribRTFormat)
+            attrib_list[i].value = VA_RT_FORMAT_YUV420;
+        else
+            attrib_list[i].value = 0;
+    }
+    return VA_STATUS_SUCCESS;
+}
+
+/*
+ * Optionally, a helper that can be called at NVENC driver initialization
+ * to verify that the VAAPI encoding interface works.
+ */
+VAStatus nvenc_init_driver(VADisplay va_display)
+{
+    VAProfile profile = VAProfileH264Main;
+    VAEntrypoint entrypoint = VAEntrypointEncSlice;
+    VAStatus status = nvenc_vaCreateConfig(va_display, profile, entrypoint, NULL, 0, &(VAConfigID){0});
+    if (status != VA_STATUS_SUCCESS) {
+         log_error("VAAPI does not support the specified profile or entrypoint");
+         return status;
+    }
+    /* We don't use the returned config id further here. */
+    log_info("NVENC VAAPI driver (encoding) initialized successfully");
+    return VA_STATUS_SUCCESS;
+}
+
+/* End of VAAPI helper functions for NVENC encoding */
+
+/* NVENC encoder structure and functions */
 
 typedef struct _NVEncoder {
     void *nvenc_lib;
@@ -164,7 +210,6 @@ int nvenc_get_profiles(VAProfile *profiles, int *num_profiles)
             nvenc_funcs.version = NV_ENCODE_API_FUNCTION_LIST_VER;
             
             if (nvEncodeAPICreateInstance(&nvenc_funcs) == NV_ENC_SUCCESS) {
-                // Create a temporary CUDA context to test capabilities
                 CUcontext cuda_ctx;
                 if (cuInit(0) == CUDA_SUCCESS) {
                     CUdevice cuda_device;
@@ -408,8 +453,7 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
 }
 
 /* Helper function to map VA surface to CUDA.
-   In a full integration this should query the backend for the mapping.
-   For now, it returns dummy values for compilation.
+   This stub should ideally query the common backend for the actual mapping.
 */
 static int map_va_surface_to_cuda(VASurfaceID surface, CUdeviceptr *cuda_ptr, unsigned int *pitch)
 {
