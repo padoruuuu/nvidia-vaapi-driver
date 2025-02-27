@@ -2021,6 +2021,9 @@ VAStatus __vaDriverInit_1_0(VADriverContextP ctx) {
         free(drv);
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-    *ctx->vtable = vtable;
+        *ctx->vtable = vtable;
+    ctx->vtable->CreateConfig = nvenc_vaCreateConfig;
+    ctx->vtable->GetConfigAttributes = nvenc_vaGetConfigAttributes;
     return VA_STATUS_SUCCESS;
+
 }
