@@ -1,5 +1,16 @@
 #define _GNU_SOURCE
 
+/*
+ * vabackend.c - NVIDIA VA-API driver backend for NVDEC, with integrated
+ * VAAPI-driver functionality.
+ *
+ * This file implements the VAAPI interface entry points (vaInitialize, vaTerminate,
+ * vaQueryConfigProfiles, vaCreateConfig, vaGetConfigAttributes, vaCreateSurfaces,
+ * vaCreateContext, vaBeginPicture, vaRenderPicture, vaEndPicture, vaSyncSurface, etc.)
+ * that are used by clients (e.g. FFmpeg) and also shared with the NVENC portion.
+ * In future you might refactor common routines into a separate module for both NVDEC and NVENC.
+ */
+
 #include "vabackend.h"
 #include "backend-common.h"
 
@@ -11,16 +22,12 @@
 #include <malloc.h>
 #include <fcntl.h>
 #include <sys/param.h>
-
 #include <va/va_backend.h>
 #include <va/va_drmcommon.h>
-
 #include <drm_fourcc.h>
-
 #include <unistd.h>
 #include <sys/types.h>
 #include <stdarg.h>
-
 #include <time.h>
 
 #ifndef __has_builtin
@@ -39,8 +46,6 @@
 
 #ifndef HAVE_GETTID
 #include <sys/syscall.h>
-/* Bionic and glibc >= 2.30 declare gettid() system call wrapper in unistd.h and
- * has a definition for it */
 #ifdef __BIONIC__
 #define HAVE_GETTID 1
 #elif !defined(__GLIBC_PREREQ)
@@ -100,6 +105,41 @@ static NVFormat nvFormatFromVaFormat(uint32_t fourcc) {
     return NV_FORMAT_NONE;
 }
 
+/* ======================================================================
+   Shared VAAPI-Driver Functionality (integrated from vaapi-driver.c)
+   These functions implement the core VAAPI entry points that are used by
+   clients (e.g. FFmpeg) and also serve as the common interface between
+   the NVDEC and (potentially) the NVENC portions.
+   ====================================================================== */
+
+/* vaInitialize - initialize the driver.
+   (Note: VAAPI clients call __vaDriverInit_1_0 to load the driver.)
+*/
+VAStatus vaInitialize(VADisplay dpy, int *major_version, int *minor_version)
+{
+    if (major_version)
+        *major_version = 1;
+    if (minor_version)
+        *minor_version = 12;
+    LOG("vaInitialize called");
+    return VA_STATUS_SUCCESS;
+}
+
+VAStatus vaTerminate(VADisplay dpy)
+{
+    LOG("vaTerminate called");
+    return VA_STATUS_SUCCESS;
+}
+
+/* ======================================================================
+   End of shared VAAPI-driver functionality
+   ====================================================================== */
+
+/* ======================================================================
+   NVDEC-specific implementations follow.
+   (The remaining functions implement the VAAPI backend interface.)
+   ====================================================================== */
+
 __attribute__ ((constructor))
 static void init() {
     char *nvdLog = getenv("NVD_LOG");
@@ -133,22 +173,19 @@ static void init() {
         }
     }
 
-    //try to detect the Firefox sandbox and skip loading CUDA if detected
+    // Try to detect the Firefox sandbox and skip loading CUDA if detected.
     int fd = open("/proc/version", O_RDONLY);
     if (fd < 0) {
         LOG("ERROR: Potential Firefox sandbox detected, failing to init!");
         LOG("If running in Firefox, set env var MOZ_DISABLE_RDD_SANDBOX=1 to disable sandbox.");
-        //exit here so we don't init CUDA, unless an env var has been set to force us to init even though we've detected a sandbox
         if (getenv("NVD_FORCE_INIT") == NULL) {
             return;
         }
     } else {
-        //we're not in a sandbox
-        //continue as normal
         close(fd);
     }
 
-    //initialise the CUDA and NVDEC functions
+    // Initialize the CUDA and NVDEC functions.
     int ret = cuda_load_functions(&cu, NULL);
     if (ret != 0) {
         cu = NULL;
@@ -162,7 +199,6 @@ static void init() {
         return;
     }
 
-    //Not really much we can do here to abort the loading of the library
     CHECK_CUDA_RESULT(cu->cuInit(0));
 }
 
@@ -175,7 +211,6 @@ static void cleanup() {
         cuda_free_functions(&cu);
     }
 }
-
 
 #ifndef __has_attribute
 #define __has_attribute(x) 0
@@ -214,46 +249,42 @@ bool checkCudaErrors(CUresult err, const char *file, const char *function, const
 }
 
 void appendBuffer(AppendableBuffer *ab, const void *buf, uint64_t size) {
-  if (ab->buf == NULL) {
-      ab->allocated = size*2;
-      ab->buf = memalign(16, ab->allocated);
-      ab->size = 0;
-  } else if (ab->size + size > ab->allocated) {
-      while (ab->size + size > ab->allocated) {
-        ab->allocated += ab->allocated >> 1;
-      }
-      void *nb = memalign(16, ab->allocated);
-      memcpy(nb, ab->buf, ab->size);
-      free(ab->buf);
-      ab->buf = nb;
-  }
-  memcpy(PTROFF(ab->buf, ab->size), buf, size);
-  ab->size += size;
+    if (ab->buf == NULL) {
+        ab->allocated = size * 2;
+        ab->buf = memalign(16, ab->allocated);
+        ab->size = 0;
+    } else if (ab->size + size > ab->allocated) {
+        while (ab->size + size > ab->allocated) {
+            ab->allocated += ab->allocated >> 1;
+        }
+        void *nb = memalign(16, ab->allocated);
+        memcpy(nb, ab->buf, ab->size);
+        free(ab->buf);
+        ab->buf = nb;
+    }
+    memcpy((char*)ab->buf + ab->size, buf, size);
+    ab->size += size;
 }
 
 static void freeBuffer(AppendableBuffer *ab) {
-  if (ab->buf != NULL) {
-      free(ab->buf);
-      ab->buf = NULL;
-      ab->size = 0;
-      ab->allocated = 0;
-  }
+    if (ab->buf != NULL) {
+        free(ab->buf);
+        ab->buf = NULL;
+        ab->size = 0;
+        ab->allocated = 0;
+    }
 }
 
 static Object allocateObject(NVDriver *drv, ObjectType type, int allocatePtrSize) {
     Object newObj = (Object) calloc(1, sizeof(struct Object_t));
-
     newObj->type = type;
     newObj->id = (++drv->nextObjId);
-
     if (allocatePtrSize > 0) {
         newObj->obj = calloc(1, allocatePtrSize);
     }
-
     pthread_mutex_lock(&drv->objectCreationMutex);
     add_element(&drv->objects, newObj);
     pthread_mutex_unlock(&drv->objectCreationMutex);
-
     return newObj;
 }
 
@@ -301,14 +332,12 @@ static void deleteObject(NVDriver *drv, VAGenericID id) {
     if (id == VA_INVALID_ID) {
         return;
     }
-
     pthread_mutex_lock(&drv->objectCreationMutex);
     ARRAY_FOR_EACH(Object, o, &drv->objects)
         if (o->id == id) {
             remove_element_at(&drv->objects, o_idx);
             free(o->obj);
             free(o);
-            //we've found the object, no need to continue
             break;
         }
     END_FOR_EACH
@@ -317,7 +346,6 @@ static void deleteObject(NVDriver *drv, VAGenericID id) {
 
 static bool destroyContext(NVDriver *drv, NVContext *nvCtx) {
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), false);
-
     LOG("Signaling resolve thread to exit");
     struct timespec timeout;
     clock_gettime(CLOCK_REALTIME, &timeout);
@@ -327,21 +355,18 @@ static bool destroyContext(NVDriver *drv, NVContext *nvCtx) {
     LOG("Waiting for resolve thread to exit");
     int ret = pthread_timedjoin_np(nvCtx->resolveThread, NULL, &timeout);
     LOG("pthread_timedjoin_np finished with %d", ret);
-
     freeBuffer(&nvCtx->sliceOffsets);
     freeBuffer(&nvCtx->bitstreamBuffer);
-
     bool successful = true;
     if (nvCtx->decoder != NULL) {
-      CUresult result = cv->cuvidDestroyDecoder(nvCtx->decoder);
-      if (result != CUDA_SUCCESS) {
-          LOG("cuvidDestroyDecoder failed: %d", result);
-          successful = false;
-      }
+        CUresult result = cv->cuvidDestroyDecoder(nvCtx->decoder);
+        if (result != CUDA_SUCCESS) {
+            LOG("cuvidDestroyDecoder failed: %d", result);
+            successful = false;
+        }
     }
     nvCtx->decoder = NULL;
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPopCurrent(NULL), false);
-
     return successful;
 }
 
@@ -381,7 +406,6 @@ static cudaVideoCodec vaToCuCodec(VAProfile profile) {
             return cvc;
         }
     }
-
     return cudaVideoCodec_NONE;
 }
 
@@ -392,9 +416,7 @@ static bool doesGPUSupportCodec(cudaVideoCodec codec, int bitDepth, cudaVideoChr
         .eChromaFormat   = chromaFormat,
         .nBitDepthMinus8 = bitDepth - 8
     };
-
     CHECK_CUDA_RESULT_RETURN(cv->cuvidGetDecoderCaps(&videoDecodeCaps), false);
-
     if (width != NULL) {
         *width = videoDecodeCaps.nMaxWidth;
     }
@@ -408,10 +430,8 @@ static void* resolveSurfaces(void *param) {
     NVContext *ctx = (NVContext*) param;
     NVDriver *drv = ctx->drv;
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), NULL);
-
     LOG("[RT] Resolve thread for %p started", ctx);
     while (!ctx->exiting) {
-        //wait for frame on queue
         pthread_mutex_lock(&ctx->resolveMutex);
         while (ctx->surfaceQueueReadIdx == ctx->surfaceQueueWriteIdx) {
             pthread_cond_wait(&ctx->resolveCondition, &ctx->resolveMutex);
@@ -421,13 +441,10 @@ static void* resolveSurfaces(void *param) {
             }
         }
         pthread_mutex_unlock(&ctx->resolveMutex);
-        //find the last item
-        //LOG("Reading from queue: %d %d", ctx->surfaceQueueReadIdx, ctx->surfaceQueueWriteIdx);
         NVSurface *surface = ctx->surfaceQueue[ctx->surfaceQueueReadIdx++];
         if (ctx->surfaceQueueReadIdx >= SURFACE_QUEUE_SIZE) {
             ctx->surfaceQueueReadIdx = 0;
         }
-
         if (surface->decodeFailed) {
             pthread_mutex_lock(&surface->mutex);
             surface->resolving = 0;
@@ -435,18 +452,13 @@ static void* resolveSurfaces(void *param) {
             pthread_mutex_unlock(&surface->mutex);
             continue;
         }
-
         CUdeviceptr deviceMemory = (CUdeviceptr) NULL;
         unsigned int pitch = 0;
-
-        //map frame
         CUVIDPROCPARAMS procParams = {
             .progressive_frame = surface->progressiveFrame,
             .top_field_first = surface->topFieldFirst,
             .second_field = surface->secondField
         };
-
-        //LOG("Mapping surface %d", surface->pictureIdx);
         if (CHECK_CUDA_RESULT(cv->cuvidMapVideoFrame(ctx->decoder, surface->pictureIdx, &deviceMemory, &pitch, &procParams))) {
             pthread_mutex_lock(&surface->mutex);
             surface->resolving = 0;
@@ -454,19 +466,13 @@ static void* resolveSurfaces(void *param) {
             pthread_mutex_unlock(&surface->mutex);
             continue;
         }
-        //LOG("Mapped surface %d to %p (%d)", surface->pictureIdx, (void*)deviceMemory, pitch);
-
-        //update cuarray
         drv->backend->exportCudaPtr(drv, deviceMemory, surface, pitch);
-        //LOG("Surface %d exported", surface->pictureIdx);
-        //unmap frame
         CHECK_CUDA_RESULT(cv->cuvidUnmapVideoFrame(ctx->decoder, deviceMemory));
     }
 out:
     LOG("[RT] Resolve thread for %p exiting", ctx);
     return NULL;
 }
-
 
 #define MAX_PROFILES 32
 static VAStatus nvQueryConfigProfiles(
@@ -477,7 +483,6 @@ static VAStatus nvQueryConfigProfiles(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
-
     int profiles = 0;
     if (doesGPUSupportCodec(cudaVideoCodec_MPEG2, 8, cudaVideoChromaFormat_420, NULL, NULL)) {
         profile_list[profiles++] = VAProfileMPEG2Simple;
@@ -514,12 +519,11 @@ static VAStatus nvQueryConfigProfiles(
         profile_list[profiles++] = VAProfileVP8Version0_3;
     }
     if (doesGPUSupportCodec(cudaVideoCodec_VP9, 8, cudaVideoChromaFormat_420, NULL, NULL)) {
-        profile_list[profiles++] = VAProfileVP9Profile0; //color depth: 8 bit, 4:2:0
+        profile_list[profiles++] = VAProfileVP9Profile0;
     }
     if (doesGPUSupportCodec(cudaVideoCodec_AV1, 8, cudaVideoChromaFormat_420, NULL, NULL)) {
         profile_list[profiles++] = VAProfileAV1Profile0;
     }
-
     if (drv->supports16BitSurface) {
         if (doesGPUSupportCodec(cudaVideoCodec_HEVC, 10, cudaVideoChromaFormat_420, NULL, NULL)) {
             profile_list[profiles++] = VAProfileHEVCMain10;
@@ -528,21 +532,19 @@ static VAStatus nvQueryConfigProfiles(
             profile_list[profiles++] = VAProfileHEVCMain12;
         }
         if (doesGPUSupportCodec(cudaVideoCodec_VP9, 10, cudaVideoChromaFormat_420, NULL, NULL)) {
-            profile_list[profiles++] = VAProfileVP9Profile2; //color depth: 10–12 bit, 4:2:0
+            profile_list[profiles++] = VAProfileVP9Profile2;
         }
     }
-
     if (drv->supports444Surface) {
         if (doesGPUSupportCodec(cudaVideoCodec_HEVC, 8, cudaVideoChromaFormat_444, NULL, NULL)) {
             profile_list[profiles++] = VAProfileHEVCMain444;
         }
         if (doesGPUSupportCodec(cudaVideoCodec_VP9, 8, cudaVideoChromaFormat_444, NULL, NULL)) {
-            profile_list[profiles++] = VAProfileVP9Profile1; //color depth: 8 bit, 4:2:2, 4:4:0, 4:4:4
+            profile_list[profiles++] = VAProfileVP9Profile1;
         }
         if (doesGPUSupportCodec(cudaVideoCodec_AV1, 8, cudaVideoChromaFormat_444, NULL, NULL)) {
             profile_list[profiles++] = VAProfileAV1Profile1;
         }
-
 #if VA_CHECK_VERSION(1, 20, 0)
         if (drv->supports16BitSurface) {
             if (doesGPUSupportCodec(cudaVideoCodec_HEVC, 10, cudaVideoChromaFormat_444, NULL, NULL)) {
@@ -552,23 +554,11 @@ static VAStatus nvQueryConfigProfiles(
                 profile_list[profiles++] = VAProfileHEVCMain444_12;
             }
             if (doesGPUSupportCodec(cudaVideoCodec_VP9, 10, cudaVideoChromaFormat_444, NULL, NULL)) {
-                profile_list[profiles++] = VAProfileVP9Profile3; //color depth: 10–12 bit, 4:2:2, 4:4:0, 4:4:4
+                profile_list[profiles++] = VAProfileVP9Profile3;
             }
         }
 #endif
     }
-
-    // Nvidia decoder doesn't support 422 chroma layout
-#if 0
-    if (doesGPUSupportCodec(cudaVideoCodec_HEVC, 10, cudaVideoChromaFormat_422, NULL, NULL)) {
-        profile_list[profiles++] = VAProfileHEVCMain422_10;
-    }
-    if (doesGPUSupportCodec(cudaVideoCodec_HEVC, 12, cudaVideoChromaFormat_422, NULL, NULL)) {
-        profile_list[profiles++] = VAProfileHEVCMain422_12;
-    }
-#endif
-
-    //now filter out the codecs we don't support
     for (int i = 0; i < profiles; i++) {
         if (vaToCuCodec(profile_list[i]) == cudaVideoCodec_NONE) {
             for (int x = i; x < profiles-1; x++) {
@@ -578,11 +568,8 @@ static VAStatus nvQueryConfigProfiles(
             i--;
         }
     }
-
     *num_profiles = profiles;
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPopCurrent(NULL), VA_STATUS_ERROR_OPERATION_FAILED);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -595,7 +582,6 @@ static VAStatus nvQueryConfigEntrypoints(
 {
     entrypoint_list[0] = VAEntrypointVLD;
     *num_entrypoints = 1;
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -612,60 +598,44 @@ static VAStatus nvGetConfigAttributes(
         return VA_STATUS_ERROR_UNSUPPORTED_PROFILE;
     }
     LOG("Got here with profile: %d == %d", profile, vaToCuCodec(profile));
-
-    for (int i = 0; i < num_attribs; i++)
-    {
-        if (attrib_list[i].type == VAConfigAttribRTFormat)
-        {
+    for (int i = 0; i < num_attribs; i++) {
+        if (attrib_list[i].type == VAConfigAttribRTFormat) {
             attrib_list[i].value = VA_RT_FORMAT_YUV420;
             switch (profile) {
             case VAProfileHEVCMain12:
             case VAProfileVP9Profile2:
                 attrib_list[i].value |= VA_RT_FORMAT_YUV420_12;
-                // Fall-through
             case VAProfileHEVCMain10:
             case VAProfileAV1Profile0:
                 attrib_list[i].value |= VA_RT_FORMAT_YUV420_10;
                 break;
-
             case VAProfileHEVCMain444_12:
             case VAProfileVP9Profile3:
                 attrib_list[i].value |= VA_RT_FORMAT_YUV444_12 | VA_RT_FORMAT_YUV420_12;
-                // Fall-through
             case VAProfileHEVCMain444_10:
             case VAProfileAV1Profile1:
                 attrib_list[i].value |= VA_RT_FORMAT_YUV444_10 | VA_RT_FORMAT_YUV420_10;
-                // Fall-through
             case VAProfileHEVCMain444:
             case VAProfileVP9Profile1:
                 attrib_list[i].value |= VA_RT_FORMAT_YUV444;
                 break;
             default:
-                //do nothing
                 break;
             }
-
             if (!drv->supports16BitSurface) {
                 attrib_list[i].value &= ~(VA_RT_FORMAT_YUV420_10 | VA_RT_FORMAT_YUV420_12 | VA_RT_FORMAT_YUV444_10 | VA_RT_FORMAT_YUV444_12);
             }
             if (!drv->supports444Surface) {
                 attrib_list[i].value &= ~(VA_RT_FORMAT_YUV444 | VA_RT_FORMAT_YUV444_10 | VA_RT_FORMAT_YUV444_12);
             }
-        }
-        else if (attrib_list[i].type == VAConfigAttribMaxPictureWidth)
-        {
+        } else if (attrib_list[i].type == VAConfigAttribMaxPictureWidth) {
             doesGPUSupportCodec(vaToCuCodec(profile), 8, cudaVideoChromaFormat_420, &attrib_list[i].value, NULL);
-        }
-        else if (attrib_list[i].type == VAConfigAttribMaxPictureHeight)
-        {
+        } else if (attrib_list[i].type == VAConfigAttribMaxPictureHeight) {
             doesGPUSupportCodec(vaToCuCodec(profile), 8, cudaVideoChromaFormat_420, NULL, &attrib_list[i].value);
-        }
-        else
-        {
+        } else {
             LOG("unhandled config attribute: %d", attrib_list[i].type);
         }
     }
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -681,33 +651,25 @@ static VAStatus nvCreateConfig(
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     LOG("got profile: %d with %d attributes", profile, num_attribs);
     cudaVideoCodec cudaCodec = vaToCuCodec(profile);
-
     if (cudaCodec == cudaVideoCodec_NONE) {
-        //we don't support this yet
         LOG("Profile not supported: %d", profile);
         return VA_STATUS_ERROR_UNSUPPORTED_PROFILE;
     }
-
     if (entrypoint != VAEntrypointVLD) {
         LOG("Entrypoint not supported: %d", entrypoint);
         return VA_STATUS_ERROR_UNSUPPORTED_ENTRYPOINT;
     }
-
     Object obj = allocateObject(drv, OBJECT_TYPE_CONFIG, sizeof(NVConfig));
     NVConfig *cfg = (NVConfig*) obj->obj;
     cfg->profile = profile;
     cfg->entrypoint = entrypoint;
-
-    //this will contain all the attributes the client cares about
     for (int i = 0; i < num_attribs; i++) {
       LOG("got config attrib: %d %d %d", i, attrib_list[i].type, attrib_list[i].value);
     }
-
     cfg->cudaCodec = cudaCodec;
     cfg->chromaFormat = cudaVideoChromaFormat_420;
     cfg->surfaceFormat = cudaVideoSurfaceFormat_NV12;
     cfg->bitDepth = 8;
-
     if (drv->supports16BitSurface) {
         switch(cfg->profile) {
         case VAProfileHEVCMain10:
@@ -720,10 +682,6 @@ static VAStatus nvCreateConfig(
             break;
         case VAProfileVP9Profile2:
         case VAProfileAV1Profile0:
-            // If the user provides an RTFormat, we can use that to identify which decoder
-            // configuration is appropriate. If a format is not required here, the caller
-            // must pass render targets to createContext so we can use those to establish
-            // the surface format and bit depth.
             if (num_attribs > 0 && attrib_list[0].type == VAConfigAttribRTFormat) {
                 switch(attrib_list[0].value) {
                 case VA_RT_FORMAT_YUV420_12:
@@ -749,7 +707,6 @@ static VAStatus nvCreateConfig(
             break;
         }
     }
-
     if (drv->supports444Surface) {
         switch(cfg->profile) {
         case VAProfileHEVCMain444:
@@ -763,7 +720,6 @@ static VAStatus nvCreateConfig(
             break;
         }
     }
-
     if (drv->supports444Surface && drv->supports16BitSurface) {
         switch(cfg->profile) {
         case VAProfileHEVCMain444_10:
@@ -778,10 +734,6 @@ static VAStatus nvCreateConfig(
             break;
         case VAProfileVP9Profile3:
         case VAProfileAV1Profile1:
-            // If the user provides an RTFormat, we can use that to identify which decoder
-            // configuration is appropriate. If a format is not required here, the caller
-            // must pass render targets to createContext so we can use those to establish
-            // the surface format and bit depth.
             if (num_attribs > 0 && attrib_list[0].type == VAConfigAttribRTFormat) {
                 switch(attrib_list[0].value) {
                 case VA_RT_FORMAT_YUV444_12:
@@ -813,9 +765,7 @@ static VAStatus nvCreateConfig(
             break;
         }
     }
-
     *config_id = obj->id;
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -825,9 +775,7 @@ static VAStatus nvDestroyConfig(
     )
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
-
     deleteObject(drv, config_id);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -842,11 +790,9 @@ static VAStatus nvQueryConfigAttributes(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVConfig *cfg = (NVConfig*) getObjectPtr(drv, config_id);
-
     if (cfg == NULL) {
         return VA_STATUS_ERROR_INVALID_CONFIG;
     }
-
     *profile = cfg->profile;
     *entrypoint = cfg->entrypoint;
     int i = 0;
@@ -856,36 +802,29 @@ static VAStatus nvQueryConfigAttributes(
     case VAProfileHEVCMain12:
     case VAProfileVP9Profile2:
         attrib_list[i].value |= VA_RT_FORMAT_YUV420_12;
-        // Fall-through
     case VAProfileHEVCMain10:
     case VAProfileAV1Profile0:
         attrib_list[i].value |= VA_RT_FORMAT_YUV420_10;
         break;
-
     case VAProfileHEVCMain444_12:
     case VAProfileVP9Profile3:
         attrib_list[i].value |= VA_RT_FORMAT_YUV444_12 | VA_RT_FORMAT_YUV420_12;
-        // Fall-through
     case VAProfileHEVCMain444_10:
     case VAProfileAV1Profile1:
         attrib_list[i].value |= VA_RT_FORMAT_YUV444_10 | VA_RT_FORMAT_YUV420_10;
-        // Fall-through
     case VAProfileHEVCMain444:
     case VAProfileVP9Profile1:
         attrib_list[i].value |= VA_RT_FORMAT_YUV444;
         break;
     default:
-        //do nothing
         break;
     }
-
     if (!drv->supports16BitSurface) {
         attrib_list[i].value &= ~(VA_RT_FORMAT_YUV420_10 | VA_RT_FORMAT_YUV420_12 | VA_RT_FORMAT_YUV444_10 | VA_RT_FORMAT_YUV444_12);
     }
     if (!drv->supports444Surface) {
         attrib_list[i].value &= ~(VA_RT_FORMAT_YUV444 | VA_RT_FORMAT_YUV444_10 | VA_RT_FORMAT_YUV444_12);
     }
-
     i++;
     *num_attribs = i;
     return VA_STATUS_SUCCESS;
@@ -903,11 +842,9 @@ static VAStatus nvCreateSurfaces2(
         )
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
-
     cudaVideoSurfaceFormat nvFormat;
     cudaVideoChromaFormat chromaFormat;
     int bitdepth;
-
     switch (format)
     {
     case VA_RT_FORMAT_YUV420:
@@ -940,13 +877,10 @@ static VAStatus nvCreateSurfaces2(
         chromaFormat = cudaVideoChromaFormat_444;
         bitdepth = 12;
         break;
-    
     default:
         LOG("Unknown format: %X", format);
         return VA_STATUS_ERROR_UNSUPPORTED_RT_FORMAT;
     }
-
-    // If there is subsampled chroma make the size a multple of it
     switch(chromaFormat) {
         case cudaVideoChromaFormat_422:
             width = ROUND_UP(width, 2);
@@ -956,12 +890,9 @@ static VAStatus nvCreateSurfaces2(
             height = ROUND_UP(height, 2);
             break;
         default:
-            // no change needed
             break;
     }
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
-
     for (uint32_t i = 0; i < num_surfaces; i++) {
         Object surfaceObject = allocateObject(drv, OBJECT_TYPE_SURFACE, sizeof(NVSurface));
         surfaces[i] = surfaceObject->id;
@@ -975,14 +906,10 @@ static VAStatus nvCreateSurfaces2(
         suf->chromaFormat = chromaFormat;
         pthread_mutex_init(&suf->mutex, NULL);
         pthread_cond_init(&suf->cond, NULL);
-
         LOG("Creating surface %dx%d, format %X (%p)", width, height, format, suf);
     }
-
     drv->surfaceCount += num_surfaces;
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPopCurrent(NULL), VA_STATUS_ERROR_OPERATION_FAILED);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -998,7 +925,6 @@ static VAStatus nvCreateSurfaces(
     return nvCreateSurfaces2(ctx, format, width, height, surfaces, num_surfaces, NULL, 0);
 }
 
-
 static VAStatus nvDestroySurfaces(
         VADriverContextP ctx,
         VASurfaceID *surface_list,
@@ -1006,19 +932,13 @@ static VAStatus nvDestroySurfaces(
     )
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
-
     for (int i = 0; i < num_surfaces; i++) {
         NVSurface *surface = (NVSurface*) getObjectPtr(drv, surface_list[i]);
-
         LOG("Destroying surface %d (%p)", surface->pictureIdx, surface);
-
         drv->backend->detachBackingImageFromSurface(drv, surface);
-
         deleteObject(drv, surface_list[i]);
     }
-
     drv->surfaceCount = MAX(drv->surfaceCount - num_surfaces, 0);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1035,14 +955,10 @@ static VAStatus nvCreateContext(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVConfig *cfg = (NVConfig*) getObjectPtr(drv, config_id);
-
     if (cfg == NULL) {
         return VA_STATUS_ERROR_INVALID_CONFIG;
     }
-
     LOG("creating context with %d render targets, %d surfaces, at %dx%d", num_render_targets, drv->surfaceCount, picture_width, picture_height);
-
-    //find the codec they've selected
     const NVCodec *selectedCodec = NULL;
     for (const NVCodec *c = __start_nvd_codecs; c < __stop_nvd_codecs; c++) {
         for (int i = 0; i < c->supportedProfileCount; i++) {
@@ -1056,9 +972,7 @@ static VAStatus nvCreateContext(
         LOG("Unable to find codec for profile: %d", cfg->profile);
         return VA_STATUS_ERROR_UNSUPPORTED_PROFILE;
     }
-
     if (num_render_targets) {
-        // Update the decoder configuration to match the passed in surfaces.
         NVSurface *surface = (NVSurface *) getObjectPtr(drv, render_targets[0]);
         if (!surface) {
             return VA_STATUS_ERROR_INVALID_PARAMETER;
@@ -1067,20 +981,13 @@ static VAStatus nvCreateContext(
         cfg->chromaFormat = surface->chromaFormat;
         cfg->bitDepth = surface->bitDepth;
     }
-
-     // Setting to maximun value if num_render_targets == 0 to prevent picture index overflow as additional surfaces can be created after calling nvCreateContext
     int surfaceCount = num_render_targets > 0 ? num_render_targets : 32;
-
     if (surfaceCount > 32) {
         LOG("Application requested %d surface(s), limiting to 32. This may cause issues.", surfaceCount);
         surfaceCount = 32;
     }
-
     int display_area_width = picture_width;
     int display_area_height = picture_height;
-
-    // If we're increasing the surface size for the chroma subsampling,
-    // increase the displayArea to match
     switch(cfg->chromaFormat) {
         case cudaVideoChromaFormat_422:
             display_area_width = ROUND_UP(display_area_width, 2);
@@ -1090,39 +997,27 @@ static VAStatus nvCreateContext(
             display_area_height = ROUND_UP(display_area_height, 2);
             break;
         default:
-            // no change needed
             break;
     }
-
     CUVIDDECODECREATEINFO vdci = {
         .ulWidth             = vdci.ulMaxWidth  = vdci.ulTargetWidth  = picture_width,
         .ulHeight            = vdci.ulMaxHeight = vdci.ulTargetHeight = picture_height,
         .CodecType           = cfg->cudaCodec,
         .ulCreationFlags     = cudaVideoCreate_PreferCUVID,
-        .ulIntraDecodeOnly   = 0, //TODO (flag & VA_PROGRESSIVE) != 0
+        .ulIntraDecodeOnly   = 0,
         .display_area.right  = display_area_width,
         .display_area.bottom = display_area_height,
         .ChromaFormat        = cfg->chromaFormat,
         .OutputFormat        = cfg->surfaceFormat,
         .bitDepthMinus8      = cfg->bitDepth - 8,
         .DeinterlaceMode     = cudaVideoDeinterlaceMode_Weave,
-
-        //we only ever map one frame at a time, so we can set this to 1
-        //it isn't particually efficient to do this, but it is simple
         .ulNumOutputSurfaces = 1,
-        //just allocate as many surfaces as have been created since we can never have as much information as the decode to guess correctly
         .ulNumDecodeSurfaces = surfaceCount,
     };
-
-    //reset this to 0 as there are some cases where the context will be destroyed but not terminated, meaning if it's initialised again
-    //we'll have even more surfaces
     drv->surfaceCount = 0;
-
     CHECK_CUDA_RESULT_RETURN(cv->cuvidCtxLockCreate(&vdci.vidLock, drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
-
     CUvideodecoder decoder;
     CHECK_CUDA_RESULT_RETURN(cv->cuvidCreateDecoder(&decoder, &vdci), VA_STATUS_ERROR_ALLOCATION_FAILED);
-
     Object contextObj = allocateObject(drv, OBJECT_TYPE_CONTEXT, sizeof(NVContext));
     NVContext *nvCtx = (NVContext*) contextObj->obj;
     nvCtx->drv = drv;
@@ -1133,12 +1028,10 @@ static VAStatus nvCreateContext(
     nvCtx->height = picture_height;
     nvCtx->codec = selectedCodec;
     nvCtx->surfaceCount = surfaceCount;
-
     pthread_mutexattr_t attrib;
     pthread_mutexattr_init(&attrib);
     pthread_mutexattr_settype(&attrib, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&nvCtx->surfaceCreationMutex, &attrib);
-
     pthread_mutex_init(&nvCtx->resolveMutex, NULL);
     pthread_cond_init(&nvCtx->resolveCondition, NULL);
     int err = pthread_create(&nvCtx->resolveThread, NULL, &resolveSurfaces, nvCtx);
@@ -1147,9 +1040,7 @@ static VAStatus nvCreateContext(
         deleteObject(drv, contextObj->id);
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     *context = contextObj->id;
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1159,21 +1050,15 @@ static VAStatus nvDestroyContext(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     LOG("Destroying context: %d", context);
-
     NVContext *nvCtx = (NVContext*) getObjectPtr(drv, context);
-
     if (nvCtx == NULL) {
         return VA_STATUS_ERROR_INVALID_CONTEXT;
     }
-
     VAStatus ret = VA_STATUS_SUCCESS;
-
     if (!destroyContext(drv, nvCtx)) {
         ret = VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     deleteObject(drv, context);
-
     return ret;
 }
 
@@ -1187,45 +1072,32 @@ static VAStatus nvCreateBuffer(
         VABufferID *buf_id
     )
 {
-    //LOG("got buffer %p, type %x, size %u, elements %u", data, type, size, num_elements);
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
-
     NVContext *nvCtx = (NVContext*) getObjectPtr(drv, context);
     if (nvCtx == NULL) {
         return VA_STATUS_ERROR_INVALID_CONTEXT;
     }
-
-    //HACK: This is an awful hack to support VP8 videos when running within FFMPEG.
-    //VA-API doesn't pass enough information for NVDEC to work with, but the information is there
-    //just before the start of the buffer that was passed to us.
     int offset = 0;
     if (nvCtx->profile == VAProfileVP8Version0_3 && type == VASliceDataBufferType) {
-        offset = (int) (((uintptr_t) data) & 0xf);
-        data = ((char *) data) - offset;
+        offset = (int)(((uintptr_t)data) & 0xf);
+        data = ((char *)data) - offset;
         size += offset;
     }
-
-    //TODO should pool these as most of the time these should be the same size
     Object bufferObject = allocateObject(drv, OBJECT_TYPE_BUFFER, sizeof(NVBuffer));
     *buf_id = bufferObject->id;
-
     NVBuffer *buf = (NVBuffer*) bufferObject->obj;
     buf->bufferType = type;
     buf->elements = num_elements;
     buf->size = num_elements * size;
     buf->ptr = memalign(16, buf->size);
     buf->offset = offset;
-
     if (buf->ptr == NULL) {
         LOG("Unable to allocate buffer of %d bytes", buf->size);
         return VA_STATUS_ERROR_ALLOCATION_FAILED;
     }
-
-    if (data != NULL)
-    {
+    if (data != NULL) {
         memcpy(buf->ptr, data, buf->size);
     }
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1246,13 +1118,10 @@ static VAStatus nvMapBuffer(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVBuffer *buf = getObjectPtr(drv, buf_id);
-
     if (buf == NULL) {
         return VA_STATUS_ERROR_INVALID_BUFFER;
     }
-
     *pbuf = buf->ptr;
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1271,17 +1140,13 @@ static VAStatus nvDestroyBuffer(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVBuffer *buf = getObjectPtr(drv, buffer_id);
-
     if (buf == NULL) {
         return VA_STATUS_ERROR_INVALID_BUFFER;
     }
-
     if (buf->ptr != NULL) {
         free(buf->ptr);
     }
-
     deleteObject(drv, buffer_id);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1294,39 +1159,28 @@ static VAStatus nvBeginPicture(
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVContext *nvCtx = (NVContext*) getObjectPtr(drv, context);
     NVSurface *surface = (NVSurface*) getObjectPtr(drv, render_target);
-
     if (surface == NULL) {
         return VA_STATUS_ERROR_INVALID_SURFACE;
     }
-
     if (surface->context != NULL && surface->context != nvCtx) {
-        //this surface was last used on a different context, we need to free up the backing image (it might not be the correct size)
         if (surface->backingImage != NULL) {
             drv->backend->detachBackingImageFromSurface(drv, surface);
         }
-        //...and reset the pictureIdx
         surface->pictureIdx = -1;
     }
-
-    //if this surface hasn't been used before, give it a new picture index
     if (surface->pictureIdx == -1) {
         if (nvCtx->currentPictureId == nvCtx->surfaceCount) {
             return VA_STATUS_ERROR_MAX_NUM_EXCEEDED;
         }
         surface->pictureIdx = nvCtx->currentPictureId++;
     }
-
-    //I don't know if we actually need to lock here, nothing should be waiting
-    //until after this function returns...
     pthread_mutex_lock(&surface->mutex);
     surface->resolving = 1;
     pthread_mutex_unlock(&surface->mutex);
-
     memset(&nvCtx->pPicParams, 0, sizeof(CUVIDPICPARAMS));
     nvCtx->renderTarget = surface;
-    nvCtx->renderTarget->progressiveFrame = true; //assume we're producing progressive frame unless the codec says otherwise
+    nvCtx->renderTarget->progressiveFrame = true;
     nvCtx->pPicParams.CurrPicIdx = nvCtx->renderTarget->pictureIdx;
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1339,13 +1193,10 @@ static VAStatus nvRenderPicture(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVContext *nvCtx = (NVContext*) getObjectPtr(drv, context);
-
     if (nvCtx == NULL) {
         return VA_STATUS_ERROR_INVALID_CONTEXT;
     }
-
     CUVIDPICPARAMS *picParams = &nvCtx->pPicParams;
-
     for (int i = 0; i < num_buffers; i++) {
         NVBuffer *buf = (NVBuffer*) getObject(drv, buffers[i])->obj;
         if (buf == NULL || buf->ptr == NULL) {
@@ -1359,7 +1210,6 @@ static VAStatus nvRenderPicture(
             LOG("Unhandled buffer type: %d", buf->bufferType);
         }
     }
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1370,49 +1220,34 @@ static VAStatus nvEndPicture(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVContext *nvCtx = (NVContext*) getObject(drv, context)->obj;
-
     if (nvCtx == NULL) {
         return VA_STATUS_ERROR_INVALID_CONTEXT;
     }
-
     CUVIDPICPARAMS *picParams = &nvCtx->pPicParams;
-
     picParams->pBitstreamData = nvCtx->bitstreamBuffer.buf;
     picParams->pSliceDataOffsets = nvCtx->sliceOffsets.buf;
     nvCtx->bitstreamBuffer.size = 0;
     nvCtx->sliceOffsets.size = 0;
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
     CUresult result = cv->cuvidDecodePicture(nvCtx->decoder, picParams);
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPopCurrent(NULL), VA_STATUS_ERROR_OPERATION_FAILED);
-
     VAStatus status = VA_STATUS_SUCCESS;
-
-    if (result != CUDA_SUCCESS)
-    {
+    if (result != CUDA_SUCCESS) {
         LOG("cuvidDecodePicture failed: %d", result);
         status = VA_STATUS_ERROR_DECODING_ERROR;
     }
-    //LOG("Decoded frame successfully to idx: %d (%p)", picParams->CurrPicIdx, nvCtx->renderTarget);
-
     NVSurface *surface = nvCtx->renderTarget;
-
     surface->context = nvCtx;
     surface->topFieldFirst = !picParams->bottom_field_flag;
     surface->secondField = picParams->second_field;
     surface->decodeFailed = status != VA_STATUS_SUCCESS;
-
-    //TODO check we're not overflowing the queue
     pthread_mutex_lock(&nvCtx->resolveMutex);
     nvCtx->surfaceQueue[nvCtx->surfaceQueueWriteIdx++] = nvCtx->renderTarget;
     if (nvCtx->surfaceQueueWriteIdx >= SURFACE_QUEUE_SIZE) {
         nvCtx->surfaceQueueWriteIdx = 0;
     }
     pthread_mutex_unlock(&nvCtx->resolveMutex);
-
-    //Wake up the resolve thread
     pthread_cond_signal(&nvCtx->resolveCondition);
-
     return status;
 }
 
@@ -1423,23 +1258,14 @@ static VAStatus nvSyncSurface(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVSurface *surface = getObjectPtr(drv, render_target);
-
     if (surface == NULL) {
         return VA_STATUS_ERROR_INVALID_SURFACE;
     }
-
-    //LOG("Syncing on surface: %d (%p)", surface->pictureIdx, surface);
-
-    //wait for resolve to occur before synchronising
     pthread_mutex_lock(&surface->mutex);
     if (surface->resolving) {
-        //LOG("Surface %d not resolved, waiting", surface->pictureIdx);
         pthread_cond_wait(&surface->cond, &surface->mutex);
     }
     pthread_mutex_unlock(&surface->mutex);
-
-    //LOG("Surface %d resolved (%p)", surface->pictureIdx, surface);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1466,7 +1292,7 @@ static VAStatus nvQuerySurfaceError(
 static VAStatus nvPutSurface(
         VADriverContextP ctx,
         VASurfaceID surface,
-        void* draw, /* Drawable of window system */
+        void* draw,
         short srcx,
         short srcy,
         unsigned short srcw,
@@ -1475,9 +1301,9 @@ static VAStatus nvPutSurface(
         short desty,
         unsigned short destw,
         unsigned short desth,
-        VARectangle *cliprects, /* client supplied clip list */
-        unsigned int number_cliprects, /* number of clip rects in the clip list */
-        unsigned int flags /* de-interlacing flags */
+        VARectangle *cliprects,
+        unsigned int number_cliprects,
+        unsigned int flags
     )
 {
     LOG("In %s", __func__);
@@ -1486,14 +1312,12 @@ static VAStatus nvPutSurface(
 
 static VAStatus nvQueryImageFormats(
         VADriverContextP ctx,
-        VAImageFormat *format_list,        /* out */
-        int *num_formats           /* out */
+        VAImageFormat *format_list,
+        int *num_formats
     )
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
-
     LOG("In %s", __func__);
-
     *num_formats = 0;
     for (unsigned int i = NV_FORMAT_NONE + 1; i < ARRAY_SIZE(formatsInfo); i++) {
         if (formatsInfo[i].is16bits && !drv->supports16BitSurface) {
@@ -1504,7 +1328,6 @@ static VAStatus nvQueryImageFormats(
         }
         format_list[(*num_formats)++] = formatsInfo[i].vaFormat;
     }
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1520,23 +1343,16 @@ static VAStatus nvCreateImage(
     NVFormat nvFormat = nvFormatFromVaFormat(format->fourcc);
     const NVFormatInfo *fmtInfo = &formatsInfo[nvFormat];
     const NVFormatPlane *p = fmtInfo->plane;
-
     if (nvFormat == NV_FORMAT_NONE) {
         return VA_STATUS_ERROR_INVALID_IMAGE_FORMAT;
     }
-
     Object imageObj = allocateObject(drv, OBJECT_TYPE_IMAGE, sizeof(NVImage));
     image->image_id = imageObj->id;
-
     LOG("created image id: %d", imageObj->id);
-
     NVImage *img = (NVImage*) imageObj->obj;
     img->width = width;
     img->height = height;
     img->format = nvFormat;
-
-    //allocate buffer to hold image when we copy down from the GPU
-    //TODO could probably put these in a pool, they appear to be allocated, used, then freed
     Object imageBufferObject = allocateObject(drv, OBJECT_TYPE_BUFFER, sizeof(NVBuffer));
     NVBuffer *imageBuffer = (NVBuffer*) imageBufferObject->obj;
     imageBuffer->bufferType = VAImageBufferType;
@@ -1546,37 +1362,19 @@ static VAStatus nvCreateImage(
     }
     imageBuffer->elements = 1;
     imageBuffer->ptr = memalign(16, imageBuffer->size);
-
     img->imageBuffer = imageBuffer;
-
     memcpy(&image->format, format, sizeof(VAImageFormat));
-    image->buf = imageBufferObject->id;	/* image data buffer */
-    /*
-     * Image data will be stored in a buffer of type VAImageBufferType to facilitate
-     * data store on the server side for optimal performance. The buffer will be
-     * created by the CreateImage function, and proper storage allocated based on the image
-     * size and format. This buffer is managed by the library implementation, and
-     * accessed by the client through the buffer Map/Unmap functions.
-     */
+    image->buf = imageBufferObject->id;
     image->width = width;
     image->height = height;
     image->data_size = imageBuffer->size;
-    image->num_planes = fmtInfo->numPlanes;	/* can not be greater than 3 */
-    /*
-     * An array indicating the scanline pitch in bytes for each plane.
-     * Each plane may have a different pitch. Maximum 3 planes for planar formats
-     */
+    image->num_planes = fmtInfo->numPlanes;
     image->pitches[0] = width * fmtInfo->bppc;
     image->pitches[1] = width * fmtInfo->bppc;
     image->pitches[2] = width * fmtInfo->bppc;
-    /*
-     * An array indicating the byte offset from the beginning of the image data
-     * to the start of each plane.
-     */
     image->offsets[0] = 0;
     image->offsets[1] = image->offsets[0] + ((width * height) >> (p[0].ss.x + p[0].ss.y)) * fmtInfo->bppc * p[0].channelCount;
     image->offsets[2] = image->offsets[1] + ((width * height) >> (p[1].ss.x + p[1].ss.y)) * fmtInfo->bppc * p[1].channelCount;
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1587,7 +1385,6 @@ static VAStatus nvDeriveImage(
     )
 {
     LOG("In %s", __func__);
-    //FAILED because we don't support it
     return VA_STATUS_ERROR_OPERATION_FAILED;
 }
 
@@ -1598,34 +1395,24 @@ static VAStatus nvDestroyImage(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVImage *img = (NVImage*) getObjectPtr(drv, image);
-
     if (img == NULL) {
         return VA_STATUS_ERROR_INVALID_IMAGE;
     }
-
     Object imageBufferObj = getObjectByPtr(drv, img->imageBuffer);
     if (imageBufferObj != NULL) {
         if (img->imageBuffer->ptr != NULL) {
             free(img->imageBuffer->ptr);
         }
-
         deleteObject(drv, imageBufferObj->id);
     }
-
     deleteObject(drv, image);
-
     return VA_STATUS_SUCCESS;
 }
 
 static VAStatus nvSetImagePalette(
             VADriverContextP ctx,
             VAImageID image,
-            /*
-                 * pointer to an array holding the palette data.  The size of the array is
-                 * num_palette_entries * entry_bytes in size.  The order of the components
-                 * in the palette is described by the component_order in VAImage struct
-                 */
-                unsigned char *palette
+            unsigned char *palette
     )
 {
     LOG("In %s", __func__);
@@ -1635,55 +1422,45 @@ static VAStatus nvSetImagePalette(
 static VAStatus nvGetImage(
         VADriverContextP ctx,
         VASurfaceID surface,
-        int x,     /* coordinates of the upper left source pixel */
+        int x,
         int y,
-        unsigned int width, /* width and height of the region */
+        unsigned int width,
         unsigned int height,
         VAImageID image
     )
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
-
     NVSurface *surfaceObj = (NVSurface*) getObject(drv, surface)->obj;
     NVImage *imageObj = (NVImage*) getObject(drv, image)->obj;
     NVContext *context = (NVContext*) surfaceObj->context;
     const NVFormatInfo *fmtInfo = &formatsInfo[imageObj->format];
     uint32_t offset = 0;
-
     if (context == NULL) {
         return VA_STATUS_ERROR_INVALID_CONTEXT;
     }
-
-    //wait for the surface to be decoded
     nvSyncSurface(ctx, surface);
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
     for (uint32_t i = 0; i < fmtInfo->numPlanes; i++) {
         const NVFormatPlane *p = &fmtInfo->plane[i];
         CUDA_MEMCPY2D memcpy2d = {
-        .srcXInBytes = 0, .srcY = 0,
-        .srcMemoryType = CU_MEMORYTYPE_ARRAY,
-        .srcArray = surfaceObj->backingImage->arrays[i],
-
-        .dstXInBytes = 0, .dstY = 0,
-        .dstMemoryType = CU_MEMORYTYPE_HOST,
-        .dstHost = (char *)imageObj->imageBuffer->ptr + offset,
-        .dstPitch = width * fmtInfo->bppc,
-
-        .WidthInBytes = (width >> p->ss.x) * fmtInfo->bppc * p->channelCount,
-        .Height = height >> p->ss.y
+            .srcXInBytes = 0, .srcY = 0,
+            .srcMemoryType = CU_MEMORYTYPE_ARRAY,
+            .srcArray = surfaceObj->backingImage->arrays[i],
+            .dstXInBytes = 0, .dstY = 0,
+            .dstMemoryType = CU_MEMORYTYPE_HOST,
+            .dstHost = (char *)imageObj->imageBuffer->ptr + offset,
+            .dstPitch = width * fmtInfo->bppc,
+            .WidthInBytes = (width >> p->ss.x) * fmtInfo->bppc * p->channelCount,
+            .Height = height >> p->ss.y
         };
-
         CUresult result = cu->cuMemcpy2D(&memcpy2d);
-        if (result != CUDA_SUCCESS)
-        {
+        if (result != CUDA_SUCCESS) {
                 LOG("cuMemcpy2D failed: %d", result);
                 return VA_STATUS_ERROR_DECODING_ERROR;
         }
         offset += ((width * height) >> (p->ss.x + p->ss.y)) * fmtInfo->bppc * p->channelCount;
     }
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPopCurrent(NULL), VA_STATUS_ERROR_OPERATION_FAILED);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -1707,9 +1484,9 @@ static VAStatus nvPutImage(
 
 static VAStatus nvQuerySubpictureFormats(
         VADriverContextP ctx,
-        VAImageFormat *format_list,        /* out */
-        unsigned int *flags,       /* out */
-        unsigned int *num_formats  /* out */
+        VAImageFormat *format_list,
+        unsigned int *flags,
+        unsigned int *num_formats
     )
 {
     LOG("In %s", __func__);
@@ -1720,7 +1497,7 @@ static VAStatus nvQuerySubpictureFormats(
 static VAStatus nvCreateSubpicture(
         VADriverContextP ctx,
         VAImageID image,
-        VASubpictureID *subpicture   /* out */
+        VASubpictureID *subpicture
     )
 {
     LOG("In %s", __func__);
@@ -1773,18 +1550,14 @@ static VAStatus nvAssociateSubpicture(
         VASubpictureID subpicture,
         VASurfaceID *target_surfaces,
         int num_surfaces,
-        short src_x, /* upper left offset in subpicture */
+        short src_x,
         short src_y,
         unsigned short src_width,
         unsigned short src_height,
-        short dest_x, /* upper left offset in surface */
+        short dest_x,
         short dest_y,
         unsigned short dest_width,
         unsigned short dest_height,
-        /*
-         * whether to enable chroma-keying or global-alpha
-         * see VA_SUBPICTURE_XXX values
-         */
         unsigned int flags
     )
 {
@@ -1805,8 +1578,8 @@ static VAStatus nvDeassociateSubpicture(
 
 static VAStatus nvQueryDisplayAttributes(
         VADriverContextP ctx,
-        VADisplayAttribute *attr_list,	/* out */
-        int *num_attributes		/* out */
+        VADisplayAttribute *attr_list,
+        int *num_attributes
         )
 {
     LOG("In %s", __func__);
@@ -1816,7 +1589,7 @@ static VAStatus nvQueryDisplayAttributes(
 
 static VAStatus nvGetDisplayAttributes(
         VADriverContextP ctx,
-        VADisplayAttribute *attr_list,	/* in/out */
+        VADisplayAttribute *attr_list,
         int num_attributes
         )
 {
@@ -1826,8 +1599,8 @@ static VAStatus nvGetDisplayAttributes(
 
 static VAStatus nvSetDisplayAttributes(
         VADriverContextP ctx,
-                VADisplayAttribute *attr_list,
-                int num_attributes
+        VADisplayAttribute *attr_list,
+        int num_attributes
         )
 {
     LOG("In %s", __func__);
@@ -1843,31 +1616,22 @@ static VAStatus nvQuerySurfaceAttributes(
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     NVConfig *cfg = (NVConfig*) getObjectPtr(drv, config);
-
     if (cfg == NULL) {
         return VA_STATUS_ERROR_INVALID_CONFIG;
     }
-
     LOG("with %d (%d) %p %d", cfg->cudaCodec, cfg->bitDepth, attrib_list, *num_attribs);
-
     if (cfg->chromaFormat != cudaVideoChromaFormat_420 && cfg->chromaFormat != cudaVideoChromaFormat_444) {
-        //TODO not sure what pixel formats are needed for 422 formats
         LOG("Unknown chrome format: %d", cfg->chromaFormat);
         return VA_STATUS_ERROR_INVALID_CONFIG;
     }
-
     if ((cfg->chromaFormat == cudaVideoChromaFormat_444 || cfg->surfaceFormat == cudaVideoSurfaceFormat_YUV444_16Bit) && !drv->supports444Surface) {
-        //TODO not sure what pixel formats are needed for 422 and 444 formats
         LOG("YUV444 surfaces not supported: %d", cfg->chromaFormat);
         return VA_STATUS_ERROR_INVALID_CONFIG;
     }
-
     if (cfg->surfaceFormat == cudaVideoSurfaceFormat_P016 && !drv->supports16BitSurface) {
-        //TODO not sure what pixel formats are needed for 422 and 444 formats
         LOG("16 bits surfaces not supported: %d", cfg->chromaFormat);
         return VA_STATUS_ERROR_INVALID_CONFIG;
     }
-
     if (num_attribs != NULL) {
         int cnt = 4;
         if (cfg->chromaFormat == cudaVideoChromaFormat_444) {
@@ -1883,45 +1647,33 @@ static VAStatus nvQuerySurfaceAttributes(
         }
         *num_attribs = cnt;
     }
-
     if (attrib_list != NULL) {
         CUVIDDECODECAPS videoDecodeCaps = {
             .eCodecType      = cfg->cudaCodec,
             .eChromaFormat   = cfg->chromaFormat,
             .nBitDepthMinus8 = cfg->bitDepth - 8
         };
-
         CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
         CHECK_CUDA_RESULT_RETURN(cv->cuvidGetDecoderCaps(&videoDecodeCaps), VA_STATUS_ERROR_OPERATION_FAILED);
         CHECK_CUDA_RESULT_RETURN(cu->cuCtxPopCurrent(NULL), VA_STATUS_ERROR_OPERATION_FAILED);
-
         attrib_list[0].type = VASurfaceAttribMinWidth;
         attrib_list[0].flags = 0;
         attrib_list[0].value.type = VAGenericValueTypeInteger;
         attrib_list[0].value.value.i = videoDecodeCaps.nMinWidth;
-
         attrib_list[1].type = VASurfaceAttribMinHeight;
         attrib_list[1].flags = 0;
         attrib_list[1].value.type = VAGenericValueTypeInteger;
         attrib_list[1].value.value.i = videoDecodeCaps.nMinHeight;
-
         attrib_list[2].type = VASurfaceAttribMaxWidth;
         attrib_list[2].flags = 0;
         attrib_list[2].value.type = VAGenericValueTypeInteger;
         attrib_list[2].value.value.i = videoDecodeCaps.nMaxWidth;
-
         attrib_list[3].type = VASurfaceAttribMaxHeight;
         attrib_list[3].flags = 0;
         attrib_list[3].value.type = VAGenericValueTypeInteger;
         attrib_list[3].value.value.i = videoDecodeCaps.nMaxHeight;
-
         LOG("Returning constraints: width: %d - %d, height: %d - %d", attrib_list[0].value.value.i, attrib_list[2].value.value.i, attrib_list[1].value.value.i, attrib_list[3].value.value.i);
-
         int attrib_idx = 4;
-
-        /* returning all the surfaces here probably isn't the best thing we could do
-         * but we don't always have enough information to determine exactly which
-         * pixel formats should be used (for instance, AV1 10-bit videos) */
         if (cfg->chromaFormat == cudaVideoChromaFormat_444) {
             attrib_list[attrib_idx].type = VASurfaceAttribPixelFormat;
             attrib_list[attrib_idx].flags = 0;
@@ -1960,30 +1712,27 @@ static VAStatus nvQuerySurfaceAttributes(
             }
         }
     }
-
     return VA_STATUS_SUCCESS;
 }
 
-/* used by va trace */
 static VAStatus nvBufferInfo(
-           VADriverContextP ctx,      /* in */
-           VABufferID buf_id,         /* in */
-           VABufferType *type,        /* out */
-           unsigned int *size,        /* out */
-           unsigned int *num_elements /* out */
+           VADriverContextP ctx,
+           VABufferID buf_id,
+           VABufferType *type,
+           unsigned int *size,
+           unsigned int *num_elements
 )
 {
     LOG("In %s", __func__);
-    *size=0;
-    *num_elements=0;
-
+    *size = 0;
+    *num_elements = 0;
     return VA_STATUS_SUCCESS;
 }
 
 static VAStatus nvAcquireBufferHandle(
             VADriverContextP    ctx,
-            VABufferID          buf_id,         /* in */
-            VABufferInfo *      buf_info        /* in/out */
+            VABufferID          buf_id,
+            VABufferInfo *      buf_info
         )
 {
     LOG("In %s", __func__);
@@ -1992,30 +1741,25 @@ static VAStatus nvAcquireBufferHandle(
 
 static VAStatus nvReleaseBufferHandle(
             VADriverContextP    ctx,
-            VABufferID          buf_id          /* in */
+            VABufferID          buf_id
         )
 {
     LOG("In %s", __func__);
     return VA_STATUS_ERROR_UNIMPLEMENTED;
 }
 
-//        /* lock/unlock surface for external access */
 static VAStatus nvLockSurface(
         VADriverContextP ctx,
         VASurfaceID surface,
-        unsigned int *fourcc, /* out  for follow argument */
+        unsigned int *fourcc,
         unsigned int *luma_stride,
         unsigned int *chroma_u_stride,
         unsigned int *chroma_v_stride,
         unsigned int *luma_offset,
         unsigned int *chroma_u_offset,
         unsigned int *chroma_v_offset,
-        unsigned int *buffer_name, /* if it is not NULL, assign the low lever
-                                    * surface buffer name
-                                    */
-        void **buffer /* if it is not NULL, map the surface buffer for
-                       * CPU access
-                       */
+        unsigned int *buffer_name,
+        void **buffer
 )
 {
     LOG("In %s", __func__);
@@ -2024,8 +1768,8 @@ static VAStatus nvLockSurface(
 
 static VAStatus nvUnlockSurface(
         VADriverContextP ctx,
-                VASurfaceID surface
-        )
+        VASurfaceID surface
+)
 {
     LOG("In %s", __func__);
     return VA_STATUS_ERROR_UNIMPLEMENTED;
@@ -2033,7 +1777,7 @@ static VAStatus nvUnlockSurface(
 
 static VAStatus nvCreateMFContext(
             VADriverContextP ctx,
-            VAMFContextID *mfe_context    /* out */
+            VAMFContextID *mfe_context
         )
 {
     LOG("In %s", __func__);
@@ -2070,15 +1814,16 @@ static VAStatus nvMFSubmit(
     LOG("In %s", __func__);
     return VA_STATUS_ERROR_UNIMPLEMENTED;
 }
+
 static VAStatus nvCreateBuffer2(
             VADriverContextP ctx,
-            VAContextID context,                /* in */
-            VABufferType type,                  /* in */
-            unsigned int width,                 /* in */
-            unsigned int height,                /* in */
-            unsigned int *unit_size,            /* out */
-            unsigned int *pitch,                /* out */
-            VABufferID *buf_id                  /* out */
+            VAContextID context,
+            VABufferType type,
+            unsigned int width,
+            unsigned int height,
+            unsigned int *unit_size,
+            unsigned int *pitch,
+            VABufferID *buf_id
     )
 {
     LOG("In %s", __func__);
@@ -2086,10 +1831,10 @@ static VAStatus nvCreateBuffer2(
 }
 
 static VAStatus nvQueryProcessingRate(
-            VADriverContextP ctx,               /* in */
-            VAConfigID config_id,               /* in */
-            VAProcessingRateParameter *proc_buf,/* in */
-            unsigned int *processing_rate	/* out */
+            VADriverContextP ctx,
+            VAConfigID config_id,
+            VAProcessingRateParameter *proc_buf,
+            unsigned int *processing_rate
         )
 {
     LOG("In %s", __func__);
@@ -2098,46 +1843,31 @@ static VAStatus nvQueryProcessingRate(
 
 static VAStatus nvExportSurfaceHandle(
             VADriverContextP    ctx,
-            VASurfaceID         surface_id,     /* in */
-            uint32_t            mem_type,       /* in */
-            uint32_t            flags,          /* in */
-            void               *descriptor      /* out */
+            VASurfaceID         surface_id,
+            uint32_t            mem_type,
+            uint32_t            flags,
+            void               *descriptor
 )
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
-
     if ((mem_type & VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2) == 0) {
         return VA_STATUS_ERROR_UNSUPPORTED_MEMORY_TYPE;
     }
     if ((flags & VA_EXPORT_SURFACE_SEPARATE_LAYERS) == 0) {
         return VA_STATUS_ERROR_INVALID_SURFACE;
     }
-
     NVSurface *surface = (NVSurface*) getObjectPtr(drv, surface_id);
     if (surface == NULL) {
         return VA_STATUS_ERROR_INVALID_SURFACE;
     }
-
-    //LOG("Exporting surface: %d (%p)", surface->pictureIdx, surface);
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
-
     if (!drv->backend->realiseSurface(drv, surface)) {
         LOG("Unable to export surface");
         return VA_STATUS_ERROR_ALLOCATION_FAILED;
     }
-
     VADRMPRIMESurfaceDescriptor *ptr = (VADRMPRIMESurfaceDescriptor*) descriptor;
-
     drv->backend->fillExportDescriptor(drv, surface, ptr);
-
-    // LOG("Exporting with w:%d h:%d o:%d p:%d m:%" PRIx64 " o:%d p:%d m:%" PRIx64, ptr->width, ptr->height, ptr->layers[0].offset[0],
-    //                                                             ptr->layers[0].pitch[0], ptr->objects[0].drm_format_modifier,
-    //                                                             ptr->layers[1].offset[0], ptr->layers[1].pitch[0],
-    //                                                             ptr->objects[1].drm_format_modifier);
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPopCurrent(NULL), VA_STATUS_ERROR_OPERATION_FAILED);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -2145,27 +1875,18 @@ static VAStatus nvTerminate( VADriverContextP ctx )
 {
     NVDriver *drv = (NVDriver*) ctx->pDriverData;
     LOG("Terminating %p", ctx);
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPushCurrent(drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
-
     drv->backend->destroyAllBackingImage(drv);
-
     deleteAllObjects(drv);
-
     drv->backend->releaseExporter(drv);
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxPopCurrent(NULL), VA_STATUS_ERROR_OPERATION_FAILED);
-
     pthread_mutex_lock(&concurrency_mutex);
     instances--;
     LOG("Now have %d (%d max) instances", instances, max_instances);
     pthread_mutex_unlock(&concurrency_mutex);
-
     CHECK_CUDA_RESULT_RETURN(cu->cuCtxDestroy(drv->cudaContext), VA_STATUS_ERROR_OPERATION_FAILED);
     drv->cudaContext = NULL;
-
     free(drv);
-
     return VA_STATUS_SUCCESS;
 }
 
@@ -2237,24 +1958,17 @@ VAStatus __vaDriverInit_1_0(VADriverContextP ctx);
 __attribute__((visibility("default")))
 VAStatus __vaDriverInit_1_0(VADriverContextP ctx) {
     LOG("Initialising NVIDIA VA-API Driver");
-
-    //drm_state can be passed in with any display type, including X11. But if it's X11, we don't
-    //want to use the fd as it'll likely be an Intel GPU, as NVIDIA doesn't support DRI3 at the moment
     bool isDrm = ctx->drm_state != NULL && ((struct drm_state*) ctx->drm_state)->fd > 0;
     int drmFd = (gpu == -1 && isDrm) ? ((struct drm_state*) ctx->drm_state)->fd : -1;
-
-    //check if the drmFd is actually an nvidia one
-    LOG("Got DRM FD: %d %d", isDrm, drmFd)
+    LOG("Got DRM FD: %d %d", isDrm, drmFd);
     if (drmFd != -1) {
         if (!isNvidiaDrmFd(drmFd, true)) {
             LOG("Passed in DRM FD does not belong to the NVIDIA driver, ignoring");
             drmFd = -1;
         } else if (!checkModesetParameterFromFd(drmFd)) {
-            //we have an NVIDIA fd but no modeset (which means no DMA-BUF support)
             return VA_STATUS_ERROR_OPERATION_FAILED;
         }
     }
-
     pthread_mutex_lock(&concurrency_mutex);
     LOG("Now have %d (%d max) instances", instances, max_instances);
     if (max_instances > 0 && instances >= max_instances) {
@@ -2263,22 +1977,16 @@ VAStatus __vaDriverInit_1_0(VADriverContextP ctx) {
     }
     instances++;
     pthread_mutex_unlock(&concurrency_mutex);
-
-    //check to make sure we initialised the CUDA functions correctly
     if (cu == NULL || cv == NULL) {
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     NVDriver *drv = (NVDriver*) calloc(1, sizeof(NVDriver));
     ctx->pDriverData = drv;
-
     drv->cu = cu;
     drv->cv = cv;
     drv->useCorrectNV12Format = true;
     drv->cudaGpuId = gpu;
-    //make sure that we want the default GPU, and that a DRM fd that we care about is passed in
     drv->drmFd = drmFd;
-
     if (backend == EGL) {
         LOG("Selecting EGL backend");
         drv->backend = &EGL_BACKEND;
@@ -2286,39 +1994,33 @@ VAStatus __vaDriverInit_1_0(VADriverContextP ctx) {
         LOG("Selecting Direct backend");
         drv->backend = &DIRECT_BACKEND;
     }
-
     ctx->max_profiles = MAX_PROFILES;
     ctx->max_entrypoints = 1;
     ctx->max_attributes = 1;
     ctx->max_display_attributes = 1;
     ctx->max_image_formats = ARRAY_SIZE(formatsInfo) - 1;
     ctx->max_subpic_formats = 1;
-
     if (backend == DIRECT) {
         ctx->str_vendor = "VA-API NVDEC driver [direct backend]";
     } else if (backend == EGL) {
         ctx->str_vendor = "VA-API NVDEC driver [egl backend]";
     }
-
     pthread_mutexattr_t attrib;
     pthread_mutexattr_init(&attrib);
     pthread_mutexattr_settype(&attrib, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&drv->objectCreationMutex, &attrib);
     pthread_mutex_init(&drv->imagesMutex, &attrib);
     pthread_mutex_init(&drv->exportMutex, NULL);
-
     if (!drv->backend->initExporter(drv)) {
         LOG("Exporter failed");
         free(drv);
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     if (CHECK_CUDA_RESULT(cu->cuCtxCreate(&drv->cudaContext, CU_CTX_SCHED_BLOCKING_SYNC, drv->cudaGpuId))) {
         drv->backend->releaseExporter(drv);
         free(drv);
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     *ctx->vtable = vtable;
     return VA_STATUS_SUCCESS;
 }
