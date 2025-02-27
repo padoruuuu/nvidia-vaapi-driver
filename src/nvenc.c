@@ -42,27 +42,26 @@
     } while (0)
 
 /*
- * Minimal VAAPI configuration functions for NVENC encoding.
- * These functions allow a VAAPI client (like FFmpeg's VAAPI encoder)
- * to open a codec even though NVENC does not implement a full VAAPI backend.
+ * NVENC-specific VAAPI helper functions.
+ * These functions are used to provide a minimal VAAPI interface for encoding.
  */
+
+__attribute__((visibility("default")))
 VAStatus nvenc_vaCreateConfig(VADisplay dpy, VAProfile profile, VAEntrypoint entrypoint,
                               VAConfigAttrib *attrib_list, int num_attribs, VAConfigID *config_id)
 {
-    /* For encoding, we simply return a dummy configuration ID.
-       (Any nonzero value is considered valid.) */
     if (!config_id)
         return VA_STATUS_ERROR_INVALID_PARAMETER;
+    /* For encoding, we simply return a dummy nonzero configuration ID */
     *config_id = 1;
     log_info("nvenc_vaCreateConfig: created dummy config id %u for profile %d, entrypoint %d", *config_id, profile, entrypoint);
     return VA_STATUS_SUCCESS;
 }
 
+__attribute__((visibility("default")))
 VAStatus nvenc_vaGetConfigAttributes(VADisplay dpy, VAProfile profile, VAEntrypoint entrypoint,
                                      VAConfigAttrib *attrib_list, int num_attribs)
 {
-    /* For our purposes, we only support NV12 (YUV420) as the render target.
-       Any attribute not of type VAConfigAttribRTFormat is returned as 0. */
     for (int i = 0; i < num_attribs; i++) {
         if (attrib_list[i].type == VAConfigAttribRTFormat)
             attrib_list[i].value = VA_RT_FORMAT_YUV420;
@@ -72,27 +71,24 @@ VAStatus nvenc_vaGetConfigAttributes(VADisplay dpy, VAProfile profile, VAEntrypo
     return VA_STATUS_SUCCESS;
 }
 
-/*
- * Optionally, a helper that can be called at NVENC driver initialization
- * to verify that the VAAPI encoding interface works.
- */
+__attribute__((visibility("default")))
 VAStatus nvenc_init_driver(VADisplay va_display)
 {
     VAProfile profile = VAProfileH264Main;
     VAEntrypoint entrypoint = VAEntrypointEncSlice;
-    VAStatus status = nvenc_vaCreateConfig(va_display, profile, entrypoint, NULL, 0, &(VAConfigID){0});
+    VAConfigID dummy;
+    VAStatus status = nvenc_vaCreateConfig(va_display, profile, entrypoint, NULL, 0, &dummy);
     if (status != VA_STATUS_SUCCESS) {
-         log_error("VAAPI does not support the specified profile or entrypoint");
+         log_error("nvenc_init_driver: failed to create dummy config for profile %d, entrypoint %d", profile, entrypoint);
          return status;
     }
-    /* We don't use the returned config id further here. */
-    log_info("NVENC VAAPI driver (encoding) initialized successfully");
+    log_info("nvenc_init_driver: NVENC VAAPI driver (encoding) initialized successfully");
     return VA_STATUS_SUCCESS;
 }
 
-/* End of VAAPI helper functions for NVENC encoding */
-
-/* NVENC encoder structure and functions */
+/*
+ * NVENC encoder implementation.
+ */
 
 typedef struct _NVEncoder {
     void *nvenc_lib;
@@ -136,32 +132,26 @@ int nvenc_is_available(void)
         fprintf(stderr, "Failed to load NVENC library: %s\n", dlerror());
         return 0;
     }
-
     PNVENCODEAPICREATEINSTANCE nvEncodeAPICreateInstance = dlsym(nvenc_lib, "NvEncodeAPICreateInstance");
     if (!nvEncodeAPICreateInstance) {
         fprintf(stderr, "Failed to get NvEncodeAPICreateInstance: %s\n", dlerror());
         dlclose(nvenc_lib);
         return 0;
     }
-
     NV_ENCODE_API_FUNCTION_LIST nvenc_funcs = {0};
     nvenc_funcs.version = NV_ENCODE_API_FUNCTION_LIST_VER;
-
     NVENCSTATUS status = nvEncodeAPICreateInstance(&nvenc_funcs);
     if (status != NV_ENC_SUCCESS) {
         fprintf(stderr, "Failed to create NVENC instance: %d\n", status);
         dlclose(nvenc_lib);
         return 0;
     }
-
-    // Check CUDA availability
     CUresult cuda_status = cuInit(0);
     if (cuda_status != CUDA_SUCCESS) {
         fprintf(stderr, "Failed to initialize CUDA: %d\n", cuda_status);
         dlclose(nvenc_lib);
         return 0;
     }
-
     int device_count = 0;
     cuda_status = cuDeviceGetCount(&device_count);
     if (cuda_status != CUDA_SUCCESS || device_count == 0) {
@@ -169,7 +159,6 @@ int nvenc_is_available(void)
         dlclose(nvenc_lib);
         return 0;
     }
-
     dlclose(nvenc_lib);
     return 1;
 }
@@ -179,15 +168,11 @@ int nvenc_get_profiles(VAProfile *profiles, int *num_profiles)
 {
     if (!profiles || !num_profiles || *num_profiles <= 0)
         return VA_STATUS_ERROR_INVALID_PARAMETER;
-
     if (!nvenc_is_available()) {
         *num_profiles = 0;
         return VA_STATUS_ERROR_UNSUPPORTED_PROFILE;
     }
-
     int profile_count = 0;
-    
-    // Add supported profiles
     if (profile_count < *num_profiles) {
         profiles[profile_count++] = VAProfileH264Main;
     }
@@ -200,15 +185,13 @@ int nvenc_get_profiles(VAProfile *profiles, int *num_profiles)
     if (profile_count < *num_profiles) {
         profiles[profile_count++] = VAProfileHEVCMain;
     }
-    
-    // Check if AV1 encoding is supported (newer NVIDIA cards)
+    /* Check for AV1 support on newer NVIDIA cards */
     void *nvenc_lib = dlopen("libnvidia-encode.so.1", RTLD_LAZY);
     if (nvenc_lib) {
         PNVENCODEAPICREATEINSTANCE nvEncodeAPICreateInstance = dlsym(nvenc_lib, "NvEncodeAPICreateInstance");
         if (nvEncodeAPICreateInstance) {
             NV_ENCODE_API_FUNCTION_LIST nvenc_funcs = {0};
             nvenc_funcs.version = NV_ENCODE_API_FUNCTION_LIST_VER;
-            
             if (nvEncodeAPICreateInstance(&nvenc_funcs) == NV_ENC_SUCCESS) {
                 CUcontext cuda_ctx;
                 if (cuInit(0) == CUDA_SUCCESS) {
@@ -246,7 +229,6 @@ int nvenc_get_profiles(VAProfile *profiles, int *num_profiles)
         }
         dlclose(nvenc_lib);
     }
-    
     *num_profiles = profile_count;
     return VA_STATUS_SUCCESS;
 }
@@ -256,15 +238,12 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
 {
     if (!nvenc_is_available())
         return VA_STATUS_ERROR_OPERATION_FAILED;
-
     if (g_encoder) {
         nvenc_terminate(); // Clean up existing encoder
     }
-
     g_encoder = calloc(1, sizeof(NVEncoder));
     if (!g_encoder)
         return VA_STATUS_ERROR_ALLOCATION_FAILED;
-
     g_encoder->nvenc_lib = dlopen("libnvidia-encode.so.1", RTLD_LAZY);
     if (!g_encoder->nvenc_lib) {
         ERROR("Failed to load NVENC library: %s\n", dlerror());
@@ -272,7 +251,6 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
         g_encoder = NULL;
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     PNVENCODEAPICREATEINSTANCE nvEncodeAPICreateInstance = dlsym(g_encoder->nvenc_lib, "NvEncodeAPICreateInstance");
     if (!nvEncodeAPICreateInstance) {
         ERROR("Failed to get NvEncodeAPICreateInstance: %s\n", dlerror());
@@ -281,10 +259,8 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
         g_encoder = NULL;
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     memset(&g_encoder->nvenc_funcs, 0, sizeof(g_encoder->nvenc_funcs));
     g_encoder->nvenc_funcs.version = NV_ENCODE_API_FUNCTION_LIST_VER;
-
     NVENCSTATUS status = nvEncodeAPICreateInstance(&g_encoder->nvenc_funcs);
     if (status != NV_ENC_SUCCESS) {
         ERROR("Failed to create NVENC instance: %d\n", status);
@@ -293,7 +269,6 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
         g_encoder = NULL;
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     /* Initialize CUDA */
     CUresult cu_result = cuInit(0);
     if (cu_result != CUDA_SUCCESS) {
@@ -303,7 +278,6 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
         g_encoder = NULL;
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     CUdevice cu_device;
     cu_result = cuDeviceGet(&cu_device, 0);
     if (cu_result != CUDA_SUCCESS) {
@@ -313,7 +287,6 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
         g_encoder = NULL;
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     cu_result = cuCtxCreate(&g_encoder->cuda_ctx, 0, cu_device);
     if (cu_result != CUDA_SUCCESS) {
         ERROR("Failed to create CUDA context: %d\n", cu_result);
@@ -322,7 +295,6 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
         g_encoder = NULL;
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     /* Initialize encoder parameters */
     g_encoder->width = width;
     g_encoder->height = height;
@@ -335,14 +307,12 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
     g_encoder->profile_guid = NV_ENC_H264_PROFILE_HIGH_GUID;
     g_encoder->preset_guid = NV_ENC_PRESET_P4_GUID;
     g_encoder->rc_mode = 2; // CBR by default
-
     /* Initialize encoder session */
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS open_params = {0};
     open_params.version = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
     open_params.deviceType = g_encoder->device_type;
     open_params.device = g_encoder->cuda_ctx;
     open_params.apiVersion = NVENCAPI_VERSION;
-
     status = g_encoder->nvenc_funcs.nvEncOpenEncodeSessionEx(&open_params, &g_encoder->encoder);
     if (status != NV_ENC_SUCCESS) {
         ERROR("Failed to open encode session: %d\n", status);
@@ -352,7 +322,6 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
         g_encoder = NULL;
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
-
     /* Create encoder configuration */
     NV_ENC_INITIALIZE_PARAMS init_params = {0};
     init_params.version = NV_ENC_INITIALIZE_PARAMS_VER;
@@ -418,13 +387,11 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
     for (int i = 0; i < MAX_SURFACES; i++) {
         NV_ENC_CREATE_BITSTREAM_BUFFER create_params = {0};
         create_params.version = NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
-        
         status = g_encoder->nvenc_funcs.nvEncCreateBitstreamBuffer(g_encoder->encoder, &create_params);
         if (status != NV_ENC_SUCCESS) {
             ERROR("Failed to create bitstream buffer: %d\n", status);
             break;
         }
-        
         g_encoder->bitstream_buffers[i] = create_params.bitstreamBuffer;
     }
     
@@ -432,14 +399,12 @@ int nvenc_init(unsigned int width, unsigned int height, unsigned int bitrate)
     status = g_encoder->nvenc_funcs.nvEncInitializeEncoder(g_encoder->encoder, &init_params);
     if (status != NV_ENC_SUCCESS) {
         ERROR("Failed to initialize encoder: %d\n", status);
-        
         for (int i = 0; i < MAX_SURFACES; i++) {
             if (g_encoder->bitstream_buffers[i]) {
                 g_encoder->nvenc_funcs.nvEncDestroyBitstreamBuffer(g_encoder->encoder, g_encoder->bitstream_buffers[i]);
                 g_encoder->bitstream_buffers[i] = NULL;
             }
         }
-        
         g_encoder->nvenc_funcs.nvEncDestroyEncoder(g_encoder->encoder);
         cuCtxDestroy(g_encoder->cuda_ctx);
         dlclose(g_encoder->nvenc_lib);
@@ -588,7 +553,6 @@ void nvenc_terminate(void)
                 g_encoder->bitstream_buffers[i] = NULL;
             }
         }
-        
         g_encoder->nvenc_funcs.nvEncDestroyEncoder(g_encoder->encoder);
         g_encoder->encoder = NULL;
     }
