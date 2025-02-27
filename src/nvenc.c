@@ -11,6 +11,14 @@
 #include "nvenc.h"
 #include "utils.h"
 
+/* Logging macros if not already defined */
+#ifndef log_info
+#define log_info(fmt, ...) fprintf(stdout, fmt "\n", ##__VA_ARGS__)
+#endif
+#ifndef log_error
+#define log_error(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
+#endif
+
 #define MAX_ENCODE_PROFILES 10
 #define MAX_SURFACES 64
 #define CHECK_CUDA(x) \
@@ -64,7 +72,91 @@ typedef struct _NVEncoder {
 
 static NVEncoder *g_encoder = NULL;
 
-// Function pointer for NVENC API entry point
+/* --- VAAPI helper functions --- */
+/* Instead of calling the system's vaQueryConfigProfiles (which our driver must implement),
+   we use our nvenc_get_profiles function to determine supported profiles. */
+static VAStatus check_va_support(VADisplay va_display, VAProfile profile, VAEntrypoint entrypoint)
+{
+    int num_supported = MAX_ENCODE_PROFILES;
+    VAProfile supported[MAX_ENCODE_PROFILES];
+    int ret = nvenc_get_profiles(supported, &num_supported);
+    if (ret != VA_STATUS_SUCCESS) {
+        log_error("nvenc_get_profiles failed");
+        return ret;
+    }
+    for (int i = 0; i < num_supported; i++) {
+        if (supported[i] == profile) {
+            log_info("Profile supported: %d", profile);
+            return VA_STATUS_SUCCESS;
+        }
+    }
+    log_error("Profile not supported: %d", profile);
+    return VA_STATUS_ERROR_UNSUPPORTED_PROFILE;
+}
+
+/* Create a dummy VAAPI configuration ID.
+   In a real driver, you would allocate and store a full configuration. */
+static VAConfigID create_va_config(VADisplay va_display, VAProfile profile, VAEntrypoint entrypoint)
+{
+    static VAConfigID next_config_id = 1;
+    // For our purposes, any nonzero id is valid.
+    return next_config_id++;
+}
+
+/* Exported VAAPI-like function to create a configuration.
+   This will be used by clients (e.g. FFmpeg's VAAPI encoder) to open the codec. */
+VAStatus nvenc_vaCreateConfig(VADisplay dpy, VAProfile profile, VAEntrypoint entrypoint,
+                              VAConfigAttrib *attrib_list, int num_attribs, VAConfigID *config_id)
+{
+    VAStatus status = check_va_support(dpy, profile, entrypoint);
+    if (status != VA_STATUS_SUCCESS)
+        return status;
+    *config_id = create_va_config(dpy, profile, entrypoint);
+    if (*config_id == VA_INVALID_ID) {
+        log_error("Failed to create VAAPI configuration");
+        return VA_STATUS_ERROR_OPERATION_FAILED;
+    }
+    log_info("NVENC VAAPI driver initialized successfully with config id %u", *config_id);
+    return VA_STATUS_SUCCESS;
+}
+
+/* Exported VAAPI-like function to query configuration attributes.
+   Here we simply support NV12 (YUV420) as the render target format. */
+VAStatus nvenc_vaGetConfigAttributes(VADisplay dpy, VAProfile profile, VAEntrypoint entrypoint,
+                                     VAConfigAttrib *attrib_list, int num_attribs)
+{
+    for (int i = 0; i < num_attribs; i++) {
+        if (attrib_list[i].type == VAConfigAttribRTFormat)
+            attrib_list[i].value = VA_RT_FORMAT_YUV420;
+        else
+            attrib_list[i].value = 0;
+    }
+    return VA_STATUS_SUCCESS;
+}
+
+/* Optional: A helper to initialize the driver via VAAPI.
+   This may be called during driver initialization if needed. */
+VAStatus nvenc_init_driver(VADisplay va_display)
+{
+    VAProfile profile = VAProfileH264Main;
+    VAEntrypoint entrypoint = VAEntrypointEncSlice;
+    VAStatus status = check_va_support(va_display, profile, entrypoint);
+    if (status != VA_STATUS_SUCCESS) {
+         log_error("VAAPI does not support the specified profile or entrypoint");
+         return status;
+    }
+    VAConfigID config_id = create_va_config(va_display, profile, entrypoint);
+    if (config_id == VA_INVALID_ID) {
+         log_error("Failed to create VAAPI configuration");
+         return VA_STATUS_ERROR_OPERATION_FAILED;
+    }
+    log_info("NVENC VAAPI driver initialized successfully with config id %u", config_id);
+    return VA_STATUS_SUCCESS;
+}
+
+/* --- End of VAAPI helper functions --- */
+
+/* Function pointer for NVENC API entry point */
 typedef NVENCSTATUS (NVENCAPI *PNVENCODEAPICREATEINSTANCE)(NV_ENCODE_API_FUNCTION_LIST *);
 
 /* Check if NVENC is available and supported */
@@ -403,12 +495,12 @@ static int map_va_surface_to_cuda(VASurfaceID surface, CUdeviceptr *cuda_ptr, un
     if (!g_encoder || !cuda_ptr || !pitch)
         return VA_STATUS_ERROR_INVALID_PARAMETER;
     
-    // Placeholder for actual implementation
-    // In a real implementation, we would:
-    // 1. Get the underlying buffer from the VA surface
-    // 2. Map it to a CUDA resource
+    // Placeholder for actual implementation:
+    // 1. Retrieve the underlying buffer from the VA surface.
+    // 2. Map it to a CUDA resource.
+    //
+    // For DRM-based VA-API, you might use VASurfaceAttribExternalBuffers and related mechanisms.
     
-    // Example code for DRM-based VA-API (this would need to be adapted to your specific VA-API implementation)
     VASurfaceAttrib attribs[1];
     attribs[0].type = VASurfaceAttribExternalBufferDescriptor;
     attribs[0].flags = VA_SURFACE_ATTRIB_SETTABLE;
@@ -418,10 +510,8 @@ static int map_va_surface_to_cuda(VASurfaceID surface, CUdeviceptr *cuda_ptr, un
     memset(&external_buffer, 0, sizeof(external_buffer));
     attribs[0].value.value.p = &external_buffer;
     
-    // This part depends on your VA-API implementation
-    // You would need to get the actual buffer handle and map it to CUDA
-    
-    // For the sake of compilation, we'll set dummy values
+    // This part depends on your VA-API implementation.
+    // For compilation purposes, set dummy values:
     *cuda_ptr = 0;
     *pitch = g_encoder->width;
     
@@ -517,9 +607,7 @@ int nvenc_encode_frame(struct nv_frame *frame)
     
     // At this point, lock_params.bitstreamBufferPtr contains the encoded data
     // and lock_params.bitstreamSizeInBytes is the size of the encoded data
-    
-    // In a real implementation, you would copy the encoded data to your output buffer
-    // or process it as needed
+    // (Process the data as needed)
     
     status = g_encoder->nvenc_funcs.nvEncUnlockBitstream(g_encoder->encoder, frame->output_buffer);
     if (status != NV_ENC_SUCCESS) {
@@ -534,9 +622,7 @@ int nvenc_encode_frame(struct nv_frame *frame)
         return VA_STATUS_ERROR_OPERATION_FAILED;
     }
     
-    // Unregister the resource - this would depend on your resource management strategy
-    // For simplicity, we're assuming you'd unregister after encoding
-    
+    // Unregister the resource as needed (depending on your resource management strategy)
     return VA_STATUS_SUCCESS;
 }
 
