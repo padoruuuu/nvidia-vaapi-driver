@@ -1,0 +1,263 @@
+Build started at 2025-02-26T20:35:51.393649
+Main binary: /usr/bin/python
+Build Options: -Db_pie=true -Dpython.bytecompile=1 -Dprefix=/usr -Dlibexecdir=lib -Dsbindir=bin -Dauto_features=enabled -Dbuildtype=release -Dwrap_mode=nodownload
+Python system: Linux
+The Meson build system
+Version: 1.7.0
+Source dir: /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git
+Build dir: /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build
+Build type: native build
+Project name: nvidia-vaapi-driver
+Project version: 0.1
+C compiler for the host machine: cc (gcc 14.2.1 "cc (GCC) 14.2.1 20250207")
+C linker for the host machine: cc ld.bfd 2.44
+-----------
+Detecting archiver via: `gcc-ar --version` -> 0
+stdout:
+GNU ar (GNU Binutils) 2.44
+Copyright (C) 2025 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+-----------
+C compiler for the build machine: cc (gcc 14.2.1 "cc (GCC) 14.2.1 20250207")
+C linker for the build machine: cc ld.bfd 2.44
+-----------
+Detecting archiver via: `gcc-ar --version` -> 0
+stdout:
+GNU ar (GNU Binutils) 2.44
+Copyright (C) 2025 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+-----------
+Build machine cpu family: x86_64
+Build machine cpu: x86_64
+Host machine cpu family: x86_64
+Host machine cpu: x86_64
+Target machine cpu family: x86_64
+Target machine cpu: x86_64
+Running compile:
+Working directory:  /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmphr0h7u3_
+Code:
+int main(void) { return 0; }
+
+-----------
+Command line: `cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmphr0h7u3_/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmphr0h7u3_/output.exe -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -lm -Wl,--allow-shlib-undefined -Wl,-O1 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,-z,pack-relative-relocs` -> 0
+Library m found: YES
+Running compile:
+Working directory:  /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpjxczaj0i
+Code:
+int main(void) { return 0; }
+
+-----------
+Command line: `cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpjxczaj0i/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpjxczaj0i/output.exe -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -ldl -Wl,--allow-shlib-undefined -Wl,-O1 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,-z,pack-relative-relocs` -> 0
+Library dl found: YES
+Dependency egl found: YES 1.5 (cached)
+Dependency ffnvcodec found: YES 12.2.72.0 (cached)
+Dependency libdrm found: YES 2.4.124 (cached)
+Dependency threads found: YES unknown (cached)
+Dependency libva found: YES 1.22.0 (cached)
+Dependency gstreamer-codecparsers-1.0 found: YES 1.24.12 (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpbtx2suwt/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpbtx2suwt/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Wmissing-field-initializers -Wno-missing-field-initializers 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Wno-missing-field-initializers: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp66pqtwl8/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp66pqtwl8/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Wunused-parameter -Wno-unused-parameter 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Wno-unused-parameter: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp3runxljq/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp3runxljq/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=format 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=format: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpt4_kacjb/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpt4_kacjb/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=format-security 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=format-security: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpsxqtgakq/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpsxqtgakq/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=incompatible-pointer-types 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=incompatible-pointer-types: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmphxygg51_/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmphxygg51_/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=init-self 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=init-self: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpz9_5bhm1/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpz9_5bhm1/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=int-conversion 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=int-conversion: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp0w3z4xkj/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp0w3z4xkj/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=missing-declarations 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=missing-declarations: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpd63r38k4/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpd63r38k4/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=missing-prototypes 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=missing-prototypes: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp1djzang8/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp1djzang8/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=pointer-arith 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=pointer-arith: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp476hnkvq/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp476hnkvq/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=undef 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=undef: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp9dk3vh81/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp9dk3vh81/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Werror=vla 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Werror=vla: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpfhimui2o/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpfhimui2o/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Wsuggest-attribute=format 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Wsuggest-attribute=format: YES (cached)
+Using cached compile:
+Cached command line:  cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpcnoxf7p3/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmpcnoxf7p3/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 -Wwrite-strings 
+
+Code:
+ extern int i;
+int i;
+
+Cached compiler stdout:
+ 
+Cached compiler stderr:
+ 
+Compiler for C supports arguments -Wwrite-strings: YES (cached)
+env[PKG_CONFIG_PATH]: 
+env[PKG_CONFIG]: /sbin/pkg-config
+-----------
+Called: `/sbin/pkg-config --variable=driverdir libva` -> 0
+stdout:
+/usr/lib/dri
+-----------
+Got pkg-config variable driverdir : /usr/lib/dri
+Build targets in project: 1
+
+nvidia-vaapi-driver 0.1
+
+  User defined options
+    auto_features     : enabled
+    b_pie             : true
+    buildtype         : release
+    libexecdir        : lib
+    prefix            : /usr
+    python.bytecompile: 1
+    sbindir           : bin
+    wrap_mode         : nodownload
+
+Found ninja-1.12.1 at /sbin/ninja
+Running compile:
+Working directory:  /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp7iy4se_u
+Code:
+
+-----------
+Command line: `cc /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp7iy4se_u/testfile.c -o /home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/meson-private/tmp7iy4se_u/output.obj -c -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security -fstack-clash-protection -fcf-protection -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/home/zeakz/Desktop/nvidia-nvenc-vaapi/src=/usr/src/debug/libva-nvidia-driver-git -flto=auto -D_FILE_OFFSET_BITS=64 -O0 --print-search-dirs` -> 0
+stdout:
+install: /usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/
+programs: =/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/:/usr/lib/gcc/x86_64-pc-linux-gnu/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/:/usr/lib/gcc/x86_64-pc-linux-gnu/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/../../../../x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu/14.2.1/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/../../../../x86_64-pc-linux-gnu/bin/
+libraries: =/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/../../../../x86_64-pc-linux-gnu/lib/x86_64-pc-linux-gnu/14.2.1/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/../../../../x86_64-pc-linux-gnu/lib/../lib/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/../../../x86_64-pc-linux-gnu/14.2.1/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/../../../../lib/:/lib/x86_64-pc-linux-gnu/14.2.1/:/lib/../lib/:/usr/lib/x86_64-pc-linux-gnu/14.2.1/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/../../../../x86_64-pc-linux-gnu/lib/:/usr/lib/gcc/x86_64-pc-linux-gnu/14.2.1/../../../:/lib/:/usr/lib/
+-----------

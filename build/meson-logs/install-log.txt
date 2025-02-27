@@ -1,0 +1,6 @@
+# List of files installed by Meson
+# Does not contain files installed by custom scripts.
+/home/zeakz/Desktop/nvidia-nvenc-vaapi/pkg/libva-nvidia-driver-git/usr/lib/dri/nvidia_drv_video.so
+/home/zeakz/Desktop/nvidia-nvenc-vaapi/pkg/libva-nvidia-driver-git/usr/lib/dri
+/home/zeakz/Desktop/nvidia-nvenc-vaapi/pkg/libva-nvidia-driver-git/usr/lib
+/home/zeakz/Desktop/nvidia-nvenc-vaapi/pkg/libva-nvidia-driver-git/usr

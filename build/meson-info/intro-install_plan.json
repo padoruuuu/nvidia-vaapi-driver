@@ -1,0 +1,10 @@
+{
+  "targets": {
+    "/home/zeakz/Desktop/nvidia-nvenc-vaapi/src/libva-nvidia-driver-git/build/nvidia_drv_video.so": {
+      "destination": "/usr/lib/dri/nvidia_drv_video.so",
+      "tag": "runtime",
+      "subproject": null,
+      "install_rpath": null
+    }
+  }
+}

@@ -1,0 +1,108 @@
+[
+  {
+    "name": "egl",
+    "type": "pkgconfig",
+    "version": "1.5",
+    "compile_args": [],
+    "link_args": [
+      "/usr/lib/libEGL.so"
+    ],
+    "include_directories": [],
+    "sources": [],
+    "extra_files": [],
+    "dependencies": [],
+    "depends": [],
+    "meson_variables": []
+  },
+  {
+    "name": "ffnvcodec",
+    "type": "pkgconfig",
+    "version": "12.2.72.0",
+    "compile_args": [],
+    "link_args": [],
+    "include_directories": [],
+    "sources": [],
+    "extra_files": [],
+    "dependencies": [],
+    "depends": [],
+    "meson_variables": []
+  },
+  {
+    "name": "libdrm",
+    "type": "pkgconfig",
+    "version": "2.4.124",
+    "compile_args": [
+      "-I/usr/include/libdrm"
+    ],
+    "link_args": [
+      "/usr/lib/libdrm.so"
+    ],
+    "include_directories": [],
+    "sources": [],
+    "extra_files": [],
+    "dependencies": [],
+    "depends": [],
+    "meson_variables": []
+  },
+  {
+    "name": "threads",
+    "type": "system",
+    "version": "unknown",
+    "compile_args": [
+      "-pthread"
+    ],
+    "link_args": [
+      "-pthread"
+    ],
+    "include_directories": [],
+    "sources": [],
+    "extra_files": [],
+    "dependencies": [],
+    "depends": [],
+    "meson_variables": []
+  },
+  {
+    "name": "libva",
+    "type": "pkgconfig",
+    "version": "1.22.0",
+    "compile_args": [],
+    "link_args": [
+      "/usr/lib/libva.so"
+    ],
+    "include_directories": [],
+    "sources": [],
+    "extra_files": [],
+    "dependencies": [],
+    "depends": [],
+    "meson_variables": [
+      "libva_deps"
+    ]
+  },
+  {
+    "name": "gstreamer-codecparsers-1.0",
+    "type": "pkgconfig",
+    "version": "1.24.12",
+    "compile_args": [
+      "-I/usr/include/gstreamer-1.0",
+      "-I/usr/include/glib-2.0",
+      "-I/usr/lib/glib-2.0/include",
+      "-I/usr/include/sysprof-6",
+      "-pthread"
+    ],
+    "link_args": [
+      "/usr/lib/libgstcodecparsers-1.0.so",
+      "/usr/lib/libgstbase-1.0.so",
+      "/usr/lib/libgstreamer-1.0.so",
+      "/usr/lib/libgobject-2.0.so",
+      "/usr/lib/libglib-2.0.so"
+    ],
+    "include_directories": [],
+    "sources": [],
+    "extra_files": [],
+    "dependencies": [],
+    "depends": [],
+    "meson_variables": [
+      "gst_codecs_deps"
+    ]
+  }
+]

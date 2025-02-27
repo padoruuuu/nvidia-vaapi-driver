@@ -1,0 +1,10 @@
+{
+  "version": "0.1",
+  "descriptive_name": "nvidia-vaapi-driver",
+  "license": [
+    "MIT"
+  ],
+  "license_files": [],
+  "subproject_dir": "subprojects",
+  "subprojects": []
+}

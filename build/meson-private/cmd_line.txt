@@ -1,0 +1,12 @@
+[options]
+b_pie = true
+python.bytecompile = 1
+prefix = /usr
+libexecdir = lib
+sbindir = bin
+auto_features = enabled
+buildtype = release
+wrap_mode = nodownload
+
+[properties]
+
